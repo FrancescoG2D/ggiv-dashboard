@@ -5,6 +5,31 @@ import yfinance as yf
 
 st.set_page_config(page_title="GGIV Dashboard", layout="wide")
 
+
+# --- SISTEMA DI SICUREZZA E LOGIN (STRADA 2) ---
+if "accesso_consentito" not in st.session_state:
+    st.session_state.accesso_consentito = False
+
+if not st.session_state.accesso_consentito:
+    st.title("🔒 Accesso Riservato GGIV")
+    st.write("Inserisci la password istituzionale per sbloccare l'algoritmo.")
+    
+    # La casella per la password (i caratteri saranno nascosti con gli asterischi)
+    password_inserita = st.text_input("Password di sblocco:", type="password")
+    
+    if st.button("Accedi"):
+        if password_inserita == "Founder2026":  # <-- QUESTA È LA TUA PASSWORD SEGRETA, PUOI CAMBIARLA!
+            st.session_state.accesso_consentito = True
+            st.rerun()  # Ricarica la pagina come utente loggato
+        else:
+            st.error("Accesso negato. Credenziali non valide.")
+            
+    # IL TRUCCO MAGICO: Se non sei loggato, Python si ferma qui e non legge il resto della dashboard!
+    st.stop()
+
+# ==========================================
+# (Da qui in giù c'è tutto il resto del tuo codice originale della Dashboard che avevi già: st.title("🛡️ GGIV..."), i KPI, ecc.)
+
 # --- INIZIALIZZAZIONE MEMORIA (SESSION STATE) ---
 if 'p_nano' not in st.session_state: st.session_state.p_nano = 9
 if 'p_amat' not in st.session_state: st.session_state.p_amat = 9
