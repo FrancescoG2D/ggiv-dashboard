@@ -51,6 +51,7 @@ tab_overview, tab_simulazioni, tab_ordini, tab_news = st.tabs([
     "📰 Radar Sentiment"
 ])
 
+
 # ==========================================
 # SCHEDA 1: OVERVIEW & DSRM
 # ==========================================
@@ -78,16 +79,50 @@ with tab_overview:
         st.info("💡 **Perché questo bilanciamento?**\n\nIl Tier 3 agisce da *Market Collapse Shield* durante i mercati ribassisti.")
 
     st.markdown("---")
-    st.header("🚦 Motore DSRM (Data Silence Risk Module)")
-    giorni_silenzio = st.slider("Giorni dall'ultima comunicazione ufficiale (T):", min_value=0, max_value=120, value=30)
+    
+    # --- IL NUOVO MOTORE DSRM ATTIVO ---
+    st.header("🚦 Motore DSRM (Riallocazione Capitale in Tempo Reale)")
+    st.write("Simula l'intervento dell'algoritmo. Quando un'azienda smette di comunicare, il GGIV le toglie fondi per spostarli nello Shield.")
 
-    def calcola_dsrm(t):
-        if t <= 45: return 1.0, "🟢 Verde (Safe)"
-        elif t <= 90: return 0.75, "🟡 Giallo (Penalità 25%)"
-        else: return 0.0, "🔴 KILL SWITCH (Espulsione)"
+    col_dsrm_comandi, col_dsrm_risultati = st.columns([1, 2])
 
-    fattore_moltiplicatore, stato_algoritmo = calcola_dsrm(giorni_silenzio)
-    st.metric(label="Stato Attuale dell'Azienda", value=stato_algoritmo, delta=f"Fattore Delta: {fattore_moltiplicatore}")
+    with col_dsrm_comandi:
+        azienda_test = st.selectbox("Seleziona Azienda Sotto Analisi:", ["NanoXplore (Tier 1)", "Aixtron (Tier 2)"])
+        peso_iniziale = 10.0  # Fissiamo il peso iniziale al 10%
+        giorni_silenzio = st.slider("Giorni di silenzio (T):", min_value=0, max_value=120, value=30)
+
+        def calcola_dsrm(t):
+            if t <= 45: return 1.0, "🟢 Verde (Safe)"
+            elif t <= 90: return 0.75, "🟡 Giallo (Penalità 25%)"
+            else: return 0.0, "🔴 KILL SWITCH (Espulsione)"
+
+        fattore_moltiplicatore, stato_algoritmo = calcola_dsrm(giorni_silenzio)
+
+    with col_dsrm_risultati:
+        st.markdown("### ⚡ Reazione del Portafoglio")
+        
+        # Calcolo matematico della penalità
+        nuovo_peso = peso_iniziale * fattore_moltiplicatore
+        capitale_liberato = peso_iniziale - nuovo_peso
+        
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Stato Allarme", stato_algoritmo)
+        
+        # Se c'è un taglio, mostriamo la differenza in rosso
+        delta_peso = f"{nuovo_peso - peso_iniziale}%" if nuovo_peso < peso_iniziale else "Invariato"
+        c2.metric(f"Peso {azienda_test}", f"{nuovo_peso}%", delta_peso, delta_color="inverse" if nuovo_peso < peso_iniziale else "off")
+        
+        # Mostriamo i soldi che finiscono nello scudo
+        c3.metric("Capitale spostato nel Tier 3", f"+{capitale_liberato}%", "Protezione Attiva" if capitale_liberato > 0 else "")
+
+        # Messaggi di sistema per spiegare l'azione all'investitore
+        if fattore_moltiplicatore == 0.0:
+            st.error(f"🚨 AZIONE ESEGUITA: L'azienda {azienda_test} è stata espulsa dall'indice. Il {capitale_liberato}% del capitale è stato istantaneamente venduto e riallocato nel Tier 3 per proteggere i fondi.")
+        elif fattore_moltiplicatore == 0.75:
+            st.warning(f"⚠️ AZIONE ESEGUITA: Rischio opacità rilevato. Il peso di {azienda_test} è stato decurtato. Il {capitale_liberato}% del capitale è stato messo in sicurezza nel Tier 3.")
+        else:
+            st.success("✅ NESSUNA AZIONE: L'azienda comunica regolarmente. Capitale allocato al 100%.")
+
 
 # ==========================================
 # SCHEDA 2: SIMULAZIONI (I NUOVI STRUMENTI)
