@@ -1,11 +1,32 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import yfinance as yf
 import numpy as np
 
 st.set_page_config(page_title="GGIV Dashboard", layout="wide")
+
+# ==========================================
+# 🔗 IL TUO DATABASE GOOGLE SHEETS
+# ==========================================
+URL_DATABASE = https://docs.google.com/spreadsheets/d/e/2PACX-1vQPnMivIJ1O9GbdTbjkrVa8InhtJ6qm1UNwrU__0bOrikkWXkJA638y6tu6Ej0hRUXeKGEQsWP8E6dX/pub?output=csv
+
+# --- FUNZIONE DI CARICAMENTO DATI ---
+@st.cache_data(ttl=60) 
+def carica_database(url):
+    if url == "INCOLLA_QUI_IL_TUO_LINK_CSV" or url == "":
+        return pd.DataFrame({
+            "Ticker": ["NNXPF", "AMAT", "AIXXF", "SSNLF", "TSM"],
+            "Azienda": ["NanoXplore", "Applied Materials", "Aixtron", "Samsung", "TSMC"],
+            "Tier": ["Tier 1", "Tier 2", "Tier 2", "Tier 3", "Tier 3"],
+            "Peso_Base": [15.0, 10.0, 10.0, 35.0, 30.0],
+            "Giorni_Silenzio": [30, 15, 20, 5, 2],
+            "Health_Score": [85, 92, 65, 88, 95]
+        })
+    else:
+        return pd.read_csv(url)
+
+df_aziende = carica_database
 
 # --- SISTEMA DI SICUREZZA E LOGIN ---
 if "accesso_consentito" not in st.session_state:
