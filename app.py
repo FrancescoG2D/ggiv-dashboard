@@ -10,7 +10,7 @@ st.set_page_config(page_title="GGIV Dashboard", layout="wide")
 # 🔗 CONFIGURAZIONE DATABASE (GOOGLE SHEETS)
 # ==========================================
 
-URL_DATABASE = https://docs.google.com/spreadsheets/d/e/2PACX-1vQPnMivIJ1O9GbdTbjkrVa8InhtJ6qm1UNwrU__0bOrikkWXkJA638y6tu6Ej0hRUXeKGEQsWP8E6dX/pub?output=csv"
+URL_DATABASE = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQPnMivIJ1O9GbdTbjkrVa8InhtJ6qm1UNwrU__0bOrikkWXkJA638y6tu6Ej0hRUXeKGEQsWP8E6dX/pub?output=csv"
 
 # --- FUNZIONE DI CARICAMENTO DATI ---
 @st.cache_data(ttl=60) 
