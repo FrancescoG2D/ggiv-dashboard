@@ -55,11 +55,12 @@ st.title("🛡️ GGIV - Graphene Global Index Vault")
 st.markdown("Terminale Istituzionale. Protezione algoritmica attiva.")
 st.markdown("---")
 
-tab_overview, tab_simulazioni, tab_ordini, tab_news = st.tabs([
+tab_overview, tab_simulazioni, tab_ordini, tab_news, tab_brevetti = st.tabs([
     "📊 Overview & DSRM", 
     "📉 Backtest & Stress Test", 
-    "🧮 Compliance & Ordini", 
-    "📰 Radar Sentiment"
+    "🧮 Rischio & Ordini", 
+    "📰 Radar Sentiment",
+    "🔬 Sensore Brevetti (IP)"
 ])
 
 # ==========================================
