@@ -248,3 +248,62 @@ with tab_news:
         st.subheader("Applied Materials")
         st.progress(0.92)
         st.caption("Sentiment: 92% Fortemente Positivo")
+
+
+# ==========================================
+# SCHEDA 5: SENSORE BREVETTI (IP TRACKER)
+# ==========================================
+with tab_brevetti:
+    st.header("🔬 IP Tracker & Patent Health Score")
+    st.write("L'algoritmo scansiona i registri internazionali (WIPO, USPTO, EPO) per valutare il 'fossato tecnologico' delle aziende in portafoglio.")
+    st.markdown("---")
+
+    col_ip1, col_ip2 = st.columns([1, 2])
+
+    with col_ip1:
+        st.subheader("Seleziona Target")
+        azienda_ip = st.selectbox("Scansiona Portafoglio Brevetti:", ["NanoXplore (Graphene Production)", "Applied Materials (Semiconductors)"])
+        
+        # Simulazione dati estratti dai registri
+        if "NanoXplore" in azienda_ip:
+            totale_brevetti = 42
+            nuovi_12m = 3
+            scadenza_critica = "Bassa (Prossimo brevetto chiave scade nel 2034)"
+            health_score = 85
+            colore_score = "🟢 Ottimo"
+        else:
+            totale_brevetti = 14500
+            nuovi_12m = 0
+            scadenza_critica = "ALTA (2 Brevetti core scadono tra 11 mesi)"
+            health_score = 40
+            colore_score = "🟡 Rischio Obsolescenza"
+
+        st.metric("Patent Health Score (0-100)", f"{health_score}/100", colore_score)
+
+    with col_ip2:
+        st.markdown("### 📊 Metriche di Innovazione")
+        
+        c_ip1, c_ip2, c_ip3 = st.columns(3)
+        c_ip1.metric("Brevetti Totali Registrati", totale_brevetti)
+        c_ip2.metric("Nuovi Depositi (Ultimi 12 Mesi)", nuovi_12m, "Trend Innovazione")
+        c_ip3.metric("Rischio Scadenza (Cliff)", "Attivo", scadenza_critica, delta_color="inverse" if health_score < 50 else "normal")
+        
+        st.markdown("### 🤖 Suggerimento Algoritmico GGIV")
+        if health_score >= 80:
+            st.success(f"**VANTAGGIO COMPETITIVO BLINDATO:** {azienda_ip} sta attivamente espandendo la sua proprietà intellettuale. Il fossato tecnologico è profondo. Mantenere l'esposizione Tier 1.")
+        elif health_score < 50:
+            st.warning(f"**ALLERTA STAGNAZIONE IP:** {azienda_ip} non ha depositato nuovi brevetti rilevanti e affronta scadenze a breve termine. L'algoritmo suggerisce di declassare il titolo al Tier 2 o ridurre il peso del 15% preventivamente.")
+
+    # Grafico a cascata per visualizzare la vita dei brevetti
+    st.markdown("---")
+    st.subheader("📅 Proiezione Scadenza Brevetti (Prossimi 5 Anni)")
+    
+    # Dati simulati per il grafico
+    anni = ["2026", "2027", "2028", "2029", "2030"]
+    brevetti_scadenza = [2, 5, 1, 0, 12] if "Nano" in azienda_ip else [450, 120, 800, 300, 150]
+    
+    df_brevetti = pd.DataFrame({"Anno": anni, "Brevetti in Scadenza": brevetti_scadenza})
+    fig_ip = px.bar(df_brevetti, x="Anno", y="Brevetti in Scadenza", text="Brevetti in Scadenza",
+                    color="Brevetti in Scadenza", color_continuous_scale="Reds")
+    fig_ip.update_layout(xaxis_type='category')
+    st.plotly_chart(fig_ip, use_container_width=True)
