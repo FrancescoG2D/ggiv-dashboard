@@ -140,43 +140,80 @@ with tab_simulazioni:
     col_c3.metric("Impatto Portafoglio", f"€ {perdita_euro:,.2f} ({impatto_totale:.1f}%)", "Mitigato")
 
 # ==========================================
-# SCHEDA 3: COMPLIANCE & ORDINI
+# SCHEDA 3: GESTIONE RISCHIO & PROFIT TAKER
 # ==========================================
 with tab_ordini:
-    st.header("⚖️ Motore di Compliance UCITS (Regola 5/10/40)")
-    st.button("🛡️ Carica Pesi Ottimali (Master Rulebook)", on_click=carica_rulebook, type="primary")
+    st.header("🛡️ Gestione Rischio & Profit Taker Dinamico")
+    st.write("Intelligenza algoritmica flessibile per massimizzare i profitti e proteggere il capitale.")
 
+    # 1. IL TERMOMETRO DEL RISCHIO PERSONALE
+    col_impostazioni, col_spazio = st.columns([1, 1])
+    with col_impostazioni:
+        limite_rischio = st.slider("🌡️ Termometro del Rischio (Max % per singolo titolo):", min_value=5, max_value=40, value=15)
+        st.caption("Oltre questa soglia, il sistema consiglierà di incassare i profitti.")
+
+    st.markdown("### 🎛️ Allocazione Attuale")
+    st.button("🔄 Carica Assetto Bilanciato base", on_click=carica_rulebook, type="primary")
+
+    # Aumentato il max_value a 50 per permetterti di simulare grosse crescite
     col_a, col_b = st.columns(2)
     with col_a:
-        peso_nano_base = st.slider("Peso NanoXplore Base (%)", min_value=0, max_value=20, key="p_nano")
-        peso_amat = st.slider("Peso Applied Materials (%)", min_value=0, max_value=20, key="p_amat")
-        peso_aix = st.slider("Peso Aixtron (%)", min_value=0, max_value=20, key="p_aix")
+        st.markdown("**Tier 1 & 2 (Volatilità e Crescita)**")
+        peso_nano_base = st.slider("Peso NanoXplore (%)", min_value=0, max_value=50, key="p_nano")
+        peso_amat = st.slider("Peso Applied Materials (%)", min_value=0, max_value=50, key="p_amat")
+        peso_aix = st.slider("Peso Aixtron (%)", min_value=0, max_value=50, key="p_aix")
     with col_b:
-        peso_sam = st.slider("Peso Samsung (%)", min_value=0, max_value=20, key="p_sam")
-        peso_tsmc = st.slider("Peso TSMC (%)", min_value=0, max_value=20, key="p_tsmc")
+        st.markdown("**Tier 3 (The Shield - Protezione)**")
+        peso_sam = st.slider("Peso Samsung (%)", min_value=0, max_value=50, key="p_sam")
+        peso_tsmc = st.slider("Peso TSMC (%)", min_value=0, max_value=50, key="p_tsmc")
     
     peso_nano_effettivo = peso_nano_base * st.session_state.dsrm_nano
-    
     if st.session_state.dsrm_nano < 1.0:
-        st.warning(f"⚠️ Nota: Il peso di NanoXplore è stato ridotto automaticamente a {peso_nano_effettivo}% dall'intervento del DSRM.")
+        st.warning(f"⚠️ Nota: Il peso di NanoXplore è stato ridotto automaticamente a {peso_nano_effettivo}% dal DSRM.")
 
-    pesi_principali = [peso_nano_effettivo, peso_amat, peso_aix, peso_sam, peso_tsmc]
-    violazione_10 = any(p > 10 for p in pesi_principali)
-    somma_maggiori_5 = sum(p for p in pesi_principali if p > 5)
-    violazione_40 = somma_maggiori_5 > 40
+    # --- IL CERVELLO FUSO (SHIELD + PROFIT TAKER) ---
+    st.markdown("### 🧠 Analisi Algoritmica del Portafoglio")
+    
+    pesi = {
+        "NanoXplore": peso_nano_effettivo, 
+        "Applied Materials": peso_amat, 
+        "Aixtron": peso_aix, 
+        "Samsung": peso_sam, 
+        "TSMC": peso_tsmc
+    }
+    somma_totale = sum(pesi.values())
+    peso_totale_shield = peso_sam + peso_tsmc
 
-    if violazione_10: st.error("🔴 TRANSAZIONI BLOCCATE: Violazione Regola 10%.")
-    elif violazione_40: st.error("🔴 TRANSAZIONI BLOCCATE: Violazione Regola 40%.")
-    else: st.success("🟢 PORTAFOGLIO A NORMA UCITS! Ordini sbloccati.")
+    # Regola 1: Golden Shield
+    if peso_totale_shield < 30:
+        st.error(f"🛡️ **ALLERTA GOLDEN SHIELD:** Il tuo Tier 3 è al {peso_totale_shield}%. Il GGIV richiede un minimo del 30% per assorbire i crolli di mercato.")
+        blocco_scudo = True
+    else:
+        st.success(f"🛡️ **GOLDEN SHIELD ATTIVO:** Tier 3 al {peso_totale_shield}%. Protezione strutturale garantita.")
+        blocco_scudo = False
+
+    # Regola 2: Profit Taker (Consigli basati sul Termometro)
+    titoli_sovraesposti = {nome: peso for nome, peso in pesi.items() if peso > limite_rischio}
+    
+    if titoli_sovraesposti:
+        for nome, peso in titoli_sovraesposti.items():
+            eccedenza = peso - limite_rischio
+            soldi_da_incassare = capitale_globale * (eccedenza / 100)
+            st.warning(f"🌡️ **SOVRAESPOSIZIONE su {nome} ({peso}%):** Hai superato il limite psicologico del {limite_rischio}%.")
+            st.info(f"💰 **PROFIT TAKER:** Vendi il **{eccedenza:.1f}%** di {nome} per incassare **€ {soldi_da_incassare:,.2f}** di profitti. Spostali nel Tier 3 per blindare il guadagno.")
 
     st.markdown("---")
-    st.header("🧮 Vault Calculator (Ordini in Tempo Reale)")
-    # RIMOSSO L'INPUT LOCALE. ORA USA IL CAPITALE_GLOBALE DELLA SIDEBAR!
+    st.header("🧮 Generatore di Ordini")
     st.write(f"Budget attuale sincronizzato: **€ {capitale_globale:,.2f}**")
 
-    if not (violazione_10 or violazione_40):
-        if st.button("Connettiti al Mercato e Genera Ordini"):
-            with st.spinner('Scaricando i prezzi...'):
+    # Controlli prima di generare l'ordine
+    if somma_totale > 100:
+        st.error(f"🔴 Errore Matematico: La somma delle percentuali è {somma_totale}%. Abbassa gli slider per tornare al 100%.")
+    elif blocco_scudo:
+        st.error("🔴 Operazione Bloccata: Ripristina il Golden Shield (Tier 3 >= 30%) per abilitare gli ordini sicuri.")
+    else:
+        if st.button("Connettiti al Mercato e Genera Ordini Strategici"):
+            with st.spinner('Calcolo delle quote in corso...'):
                 def ottieni_prezzo(ticker):
                     try: return round(yf.Ticker(ticker).history(period="1d")['Close'].iloc[-1], 2)
                     except: return 0.001
@@ -184,7 +221,6 @@ with tab_ordini:
                 ordini = pd.DataFrame({
                     "Azienda (Ticker)": ["NanoXplore (NNXPF)", "Applied Materials (AMAT)", "Aixtron (AIXXF)", "Samsung (SSNLF)", "TSMC (TSM)"],
                     "Prezzo LIVE ($)": [ottieni_prezzo("NNXPF"), ottieni_prezzo("AMAT"), ottieni_prezzo("AIXXF"), ottieni_prezzo("SSNLF"), ottieni_prezzo("TSM")],
-                    # MATEMATICA COLLEGATA AL CAPITALE GLOBALE
                     "Budget Assegnato": [capitale_globale * (peso_nano_effettivo/100), capitale_globale * (peso_amat/100), capitale_globale * (peso_aix/100), capitale_globale * (peso_sam/100), capitale_globale * (peso_tsmc/100)]
                 })
                 
@@ -195,6 +231,7 @@ with tab_ordini:
                 
                 csv = ordini_filtrati.to_csv(index=False).encode('utf-8')
                 st.download_button(label="📥 Scarica Report Ordini (CSV)", data=csv, file_name='Ordini_GGIV.csv', mime='text/csv')
+                   
 
 # ==========================================
 # SCHEDA 4: RADAR SENTIMENT
