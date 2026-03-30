@@ -109,18 +109,64 @@ capitale_globale = st.sidebar.number_input("Capitale AUM (€):", min_value=1000
 st.sidebar.markdown("---")
 st.sidebar.info("📡 **Database Live**\nIl sistema è connesso al tuo Google Sheets. Aggiorna il file per modificare l'indice in tempo reale.")
 
-# --- INTESTAZIONE ---
-st.title("🛡️ GGIV - Graphene Global Index Vault")
-st.markdown("Terminale Istituzionale Quantitativo. Connesso al Database Centrale.")
-st.markdown("---")
+import streamlit as st
 
-tab_overview, tab_simulazioni, tab_ordini, tab_news, tab_brevetti = st.tabs([
-    "📊 Overview & DSRM", 
-    "📉 Backtest & Stress Test", 
-    "🧮 Rischio & Ordini", 
-    "📰 Radar Sentiment",
-    "🔬 Sensore Brevetti (IP)"
-])
+# ==========================================
+# 1. IL TRUCCO CSS PER BLOCCARE LA SCATOLA IN ALTO
+# ==========================================
+st.markdown("""
+    <style>
+        /* Nasconde il menu base di Streamlit (i tre pallini in alto a dx) per pulire la vista */
+        header {visibility: hidden;}
+        
+        /* Cerca il contenitore con la nostra 'ancora-fissa' e lo inchioda in alto */
+        div[data-testid="stVerticalBlock"]:has(div.ancora-fissa) {
+            position: sticky;
+            top: 0px; /* NOTA: Se hai tenuto il ticker animato verde, cambia 0px con 45px */
+            background-color: white; /* Fondamentale: copre i grafici che scorrono sotto */
+            z-index: 999;
+            padding-top: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid #f0f2f6; /* Linea di separazione elegante */
+        }
+        
+        /* Assicura che anche la barra dei bottoni (Tab) non sia trasparente */
+        div[data-testid="stTabs"] > div[data-baseweb="tab-list"] {
+            background-color: white;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+
+# ==========================================
+# 2. CREAZIONE DEL CONTENITORE FISSO (LA SCATOLA)
+# ==========================================
+header_container = st.container()
+
+with header_container:
+    # Questa è l'ancora invisibile che il CSS va a cercare per bloccare la scatola
+    st.markdown("<div class='ancora-fissa'></div>", unsafe_allow_html=True)
+    
+    # I tuoi titoli esatti
+    st.title("🛡️ GGIV - Graphene Global Index Vault")
+    st.caption("Terminale Istituzionale Quantitativo. Connesso al Database Centrale.")
+    
+    # I tuoi Tab di navigazione
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📊 Overview & DSRM", 
+        "📉 Backtest & Stress Test", 
+        "🧮 Rischio & Ordini", 
+        "📰 Radar Sentiment", 
+        "🔬 Sensore Brevetti (IP)"
+    ])
+
+
+# ==========================================
+# 3. IL CONTENUTO CHE PUÒ SCORRERE LIBERAMENTE
+# ==========================================
+with tab1:
+    st.write("Contenuto dell'Overview (Prova a inserire tanti dati e scorri giù...)")
+    # ... Incolla qui tutto il tuo codice esistente per il tab 1 ...
 
 # ==========================================
 # SCHEDA 1: OVERVIEW & DSRM
