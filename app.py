@@ -10,39 +10,42 @@ import streamlit as st
 
 # --- INIZIO EFFETTO TICKER IN SOVRAIMPRESSIONE ---
 
-# Per ora simuliamo i dati del Ticker per creare l'effetto visivo.
-# In futuro li collegheremo direttamente alle variabili reali del tuo database!
 ticker_text = "🟢 GGIV INDEX: 10,245.50 (+1.4%) &nbsp;&nbsp;&nbsp; | &nbsp;&nbsp;&nbsp; 🛡️ GOLDEN SHIELD: ATTIVO (40% ALLOCATO) &nbsp;&nbsp;&nbsp; | &nbsp;&nbsp;&nbsp; 🚀 TIER 1 PIONIERI: PESO OTTIMALE &nbsp;&nbsp;&nbsp; | &nbsp;&nbsp;&nbsp; 🧠 HEALTH SCORE MEDIO: 88/100"
 
-# Iniezione di CSS e HTML per creare l'animazione e bloccare la barra in alto
 st.markdown(f"""
 <style>
-    /* Stile per bloccare la barra in alto (Sticky Header) */
+    /* 1. Spinge il contenuto della dashboard in basso per fare spazio al ticker */
+    .block-container {{
+        padding-top: 6rem !important; 
+    }}
+    
+    /* 2. Inchioda il ticker allo schermo, appena sotto l'header nativo di Streamlit */
     .ticker-wrap {{
-        position: sticky;
-        top: 0;
-        z-index: 999;
-        width: 100%;
-        background-color: #0e1117; /* Sfondo scuro elegante */
-        border-bottom: 2px solid #1f77b4; /* Linea blu istituzionale */
-        border-top: 2px solid #1f77b4;
+        position: fixed;
+        top: 2.875rem; /* Lascia esattamente lo spazio per i selettori di pagina in alto */
+        left: 0;
+        width: 100vw; /* Prende tutta la larghezza del monitor */
+        z-index: 999999; /* Lo mette in primo piano sopra a qualsiasi grafico */
+        background-color: #0e1117;
+        border-bottom: 2px solid #1f77b4;
+        border-top: 1px solid #333;
         padding: 10px 0;
         overflow: hidden;
         white-space: nowrap;
-        margin-bottom: 30px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        box-shadow: 0 4px 10px rgba(0,0,0,0.5); /* Effetto ombra per staccarlo dallo sfondo */
     }}
-    /* Stile per il testo e l'animazione di scorrimento */
+    
+    /* 3. Il testo e l'animazione */
     .ticker-text {{
         display: inline-block;
         padding-left: 100%;
-        animation: ticker 25s linear infinite; /* 25 secondi per fare un giro, puoi alzarlo o abbassarlo */
-        font-family: 'Courier New', Courier, monospace; /* Font stile terminale finanziario */
+        animation: ticker 25s linear infinite;
+        font-family: 'Courier New', Courier, monospace;
         font-size: 16px;
         font-weight: bold;
-        color: #00ff00; /* Colore verde fluo in stile Wall Street */
+        color: #00ff00;
     }}
-    /* Il motore dell'animazione (da destra a sinistra) */
+    
     @keyframes ticker {{
         0%   {{ transform: translate3d(0, 0, 0); }}
         100% {{ transform: translate3d(-100%, 0, 0); }}
