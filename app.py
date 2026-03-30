@@ -166,7 +166,7 @@ with header_container:
 # ==========================================
 with tab1:
     st.write("Contenuto dell'Overview (Prova a inserire tanti dati e scorri giù...)")
-    # ... Incolla qui tutto il tuo codice esistente per il tab 1 ...
+
 
 # ==========================================
 # SCHEDA 1: OVERVIEW & DSRM
