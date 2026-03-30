@@ -151,8 +151,8 @@ with header_container:
     st.title("🛡️ GGIV - Graphene Global Index Vault")
     st.caption("Terminale Istituzionale Quantitativo. Connesso al Database Centrale.")
     
-    # I tuoi Tab di navigazione
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+   # Usiamo i nomi esatti che il resto del tuo codice sta cercando
+    tab_overview, tab_backtest, tab_rischio, tab_sentiment, tab_brevetti = st.tabs([
         "📊 Overview & DSRM", 
         "📉 Backtest & Stress Test", 
         "🧮 Rischio & Ordini", 
