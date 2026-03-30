@@ -164,7 +164,7 @@ with header_container:
 # ==========================================
 # 3. IL CONTENUTO CHE PUÒ SCORRERE LIBERAMENTE
 # ==========================================
-with tab1:
+
     st.write("Contenuto dell'Overview (Prova a inserire tanti dati e scorri giù...)")
 
 
