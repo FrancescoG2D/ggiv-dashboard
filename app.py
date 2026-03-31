@@ -4,10 +4,78 @@ import plotly.express as px
 import yfinance as yf
 import numpy as np
 
+
+
+
+    
+    
+
+
+
+
+
+
+import streamlit as st
+
+
+# ==========================================
+# 🔗 CONFIGURAZIONE DATABASE (GOOGLE SHEETS)
+# ==========================================
+URL_DATABASE = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQPnMivIJ1O9GbdTbjkrVa8InhtJ6qm1UNwrU__0bOrikkWXkJA638y6tu6Ej0hRUXeKGEQsWP8E6dX/pub?output=csv"
+
+@st.cache_data(ttl=60) 
+def carica_database(url):
+    try:
+        return pd.read_csv(url)
+    except Exception as e:
+        st.error(f"Errore di connessione al database: {e}")
+        return pd.DataFrame()
+
+df_aziende = carica_database(URL_DATABASE)
+
+# --- LOGICA DSRM AUTOMATICA ---
+def applica_dsrm(giorni):
+    if giorni <= 45: return 1.0
+    elif giorni <= 90: return 0.75
+    else: return 0.0
+
+if not df_aziende.empty:
+    df_aziende['Fattore_DSRM'] = df_aziende['Giorni_Silenzio'].apply(applica_dsrm)
+    df_aziende['Peso_Effettivo'] = df_aziende['Peso_Base'] * df_aziende['Fattore_DSRM']
+    # Calcolo dei capitali spostati dallo scudo per le statistiche
+    df_aziende['Percentuale_Persa'] = df_aziende['Peso_Base'] - df_aziende['Peso_Effettivo']
+
+
 # 1. CONFIGURAZIONE PAGINA
 st.set_page_config(page_title="GGIV Terminal", layout="wide")
 
-# 2. TICKER E CSS "BLINDATO"
+# 2. TITOLO
+st.title("🛡️ GGIV - Graphene Global Index Vault")
+st.caption("Terminale Istituzionale Quantitativo. Connesso al Database Centrale.")
+
+
+
+
+# --- SISTEMA DI SICUREZZA ---
+if "accesso_consentito" not in st.session_state:
+    st.session_state.accesso_consentito = False
+
+if not st.session_state.accesso_consentito:
+    st.title("🔒 Accesso Riservato GGIV")
+    st.write("Inserisci la password istituzionale per sbloccare l'algoritmo.")
+    password_inserita = st.text_input("Password di sblocco:", type="password", key="login")
+    if st.button("Accedi"):
+        if password_inserita == "Founder2026": 
+            st.session_state.accesso_consentito = True
+            st.rerun()
+        else:
+            st.error("Accesso negato. Credenziali non valide.")
+    st.stop()
+
+
+
+
+# 3. TICKER E CSS "BLINDATO"
 ticker_text = "🟢 GGIV INDEX: 10,245.50 (+1.4%) &nbsp;&nbsp;&nbsp; | &nbsp;&nbsp;&nbsp; 🛡️ GOLDEN SHIELD: ATTIVO (40% ALLOCATO) &nbsp;&nbsp;&nbsp; | &nbsp;&nbsp;&nbsp; 🚀 TIER 1 PIONIERI: PESO OTTIMALE"
 
 st.markdown(f"""
@@ -46,86 +114,17 @@ st.markdown(f"""
         100% {{ left: 0; transform: translateX(-100%); }}
     }}
 
-    /* LA CALAMITA PER I TAB */
-    div[data-testid="stTabs"] > div:first-child {{
-        position: sticky !important;
-        top: 40px !important; /* Si ferma esattamente sotto i 40px del ticker */
-        background-color: white !important; /* Essenziale per coprire i grafici */
-        z-index: 9999 !important;
-        padding-top: 10px !important;
-        padding-bottom: 5px !important;
-        border-bottom: 1px solid #ddd !important;
-    }}
-
-    /* Spinge i contenuti giù all'inizio */
-    .block-container {{
-        padding-top: 3.5rem !important;
-    }}
-</style>
-
-<div class="ticker-wrap"><div class="ticker-text">{ticker_text}</div></div>
+    <div class="ticker-wrap"><div class="ticker-text">{ticker_text}</div></div>
 """, unsafe_allow_html=True)
 
-# 3. BARRA LATERALE
-with st.sidebar:
-    st.header("⚙️ Impostazioni GGIV")
-    capitale_iniziale = st.number_input("Capitale da Investire (€)", min_value=1000, value=100000, step=1000)
 
-# 4. TITOLO E TAB
-st.title("🛡️ GGIV - Graphene Global Index Vault")
-st.caption("Terminale Istituzionale Quantitativo. Connesso al Database Centrale.")
-
-tab_overview, tab_backtest, tab_rischio, tab_sentiment, tab_brevetti = st.tabs([
+    tab_overview, tab_backtest, tab_rischio, tab_sentiment, tab_brevetti = st.tabs([
     "📊 Overview & DSRM", 
     "📉 Backtest & Stress Test", 
     "🧮 Rischio & Ordini", 
     "📰 Radar Sentiment", 
     "🔬 Sensore Brevetti (IP)"
 ])
-import streamlit as st
-
-# ==========================================
-# 🔗 CONFIGURAZIONE DATABASE (GOOGLE SHEETS)
-# ==========================================
-URL_DATABASE = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQPnMivIJ1O9GbdTbjkrVa8InhtJ6qm1UNwrU__0bOrikkWXkJA638y6tu6Ej0hRUXeKGEQsWP8E6dX/pub?output=csv"
-
-@st.cache_data(ttl=60) 
-def carica_database(url):
-    try:
-        return pd.read_csv(url)
-    except Exception as e:
-        st.error(f"Errore di connessione al database: {e}")
-        return pd.DataFrame()
-
-df_aziende = carica_database(URL_DATABASE)
-
-# --- LOGICA DSRM AUTOMATICA ---
-def applica_dsrm(giorni):
-    if giorni <= 45: return 1.0
-    elif giorni <= 90: return 0.75
-    else: return 0.0
-
-if not df_aziende.empty:
-    df_aziende['Fattore_DSRM'] = df_aziende['Giorni_Silenzio'].apply(applica_dsrm)
-    df_aziende['Peso_Effettivo'] = df_aziende['Peso_Base'] * df_aziende['Fattore_DSRM']
-    # Calcolo dei capitali spostati dallo scudo per le statistiche
-    df_aziende['Percentuale_Persa'] = df_aziende['Peso_Base'] - df_aziende['Peso_Effettivo']
-
-# --- SISTEMA DI SICUREZZA ---
-if "accesso_consentito" not in st.session_state:
-    st.session_state.accesso_consentito = False
-
-if not st.session_state.accesso_consentito:
-    st.title("🔒 Accesso Riservato GGIV")
-    st.write("Inserisci la password istituzionale per sbloccare l'algoritmo.")
-    password_inserita = st.text_input("Password di sblocco:", type="password", key="login")
-    if st.button("Accedi"):
-        if password_inserita == "Founder2026": 
-            st.session_state.accesso_consentito = True
-            st.rerun()
-        else:
-            st.error("Accesso negato. Credenziali non valide.")
-    st.stop()
 
 # --- SIDEBAR GLOBALE ---
 st.sidebar.image("https://img.icons8.com/color/96/000000/shield.png", width=80)
@@ -135,8 +134,6 @@ st.sidebar.markdown("---")
 st.sidebar.info("📡 **Database Live**\nIl sistema è connesso al tuo Google Sheets. Aggiorna il file per modificare l'indice in tempo reale.")
 
 import streamlit as st
-
-
 
 
 # ==========================================
