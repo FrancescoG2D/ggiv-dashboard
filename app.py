@@ -49,11 +49,17 @@ if not df_aziende.empty:
 # 1. CONFIGURAZIONE PAGINA
 st.set_page_config(page_title="GGIV Terminal", layout="wide")
 
-# 2. TITOLO
+# 2. TITOLO e TAB
 st.title("🛡️ GGIV - Graphene Global Index Vault")
 st.caption("Terminale Istituzionale Quantitativo. Connesso al Database Centrale.")
 
-
+    tab_overview, tab_backtest, tab_rischio, tab_sentiment, tab_brevetti = st.tabs([
+    "📊 Overview & DSRM", 
+    "📉 Backtest & Stress Test", 
+    "🧮 Rischio & Ordini", 
+    "📰 Radar Sentiment", 
+    "🔬 Sensore Brevetti (IP)"
+])
 
 
 # --- SISTEMA DI SICUREZZA ---
