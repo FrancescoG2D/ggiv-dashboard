@@ -247,7 +247,7 @@ with tab_backtest:
 # ==========================================
 # SCHEDA 3: RISCHIO & ORDINI
 # ==========================================
-with tab_ordini:
+with tab_rischio:
     st.header("🛡️ Gestione Rischio & Profit Taker Dinamico")
     
     col_impostazioni, col_spazio = st.columns([1, 1])
@@ -301,7 +301,7 @@ with tab_ordini:
 # ==========================================
 # SCHEDA 4 E 5: NEWS E BREVETTI
 # ==========================================
-with tab_news:
+with tab_sentiment:
     st.header("📰 Radar Sentiment")
     col_news1, col_news2 = st.columns(2)
     with col_news1:
