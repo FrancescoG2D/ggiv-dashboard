@@ -4,74 +4,77 @@ import plotly.express as px
 import yfinance as yf
 import numpy as np
 
-# 1. CONFIGURAZIONE (Sempre la prima riga)
+# 1. CONFIGURAZIONE PAGINA
 st.set_page_config(page_title="GGIV Terminal", layout="wide")
 
-# 2. TICKER E CSS "CALAMITA" PER I TAB
+# 2. TICKER E CSS "BLINDATO"
 ticker_text = "🟢 GGIV INDEX: 10,245.50 (+1.4%) &nbsp;&nbsp;&nbsp; | &nbsp;&nbsp;&nbsp; 🛡️ GOLDEN SHIELD: ATTIVO (40% ALLOCATO) &nbsp;&nbsp;&nbsp; | &nbsp;&nbsp;&nbsp; 🚀 TIER 1 PIONIERI: PESO OTTIMALE"
 
 st.markdown(f"""
 <style>
-    /* Nasconde l'header nativo per pulizia */
+    /* Nasconde la barra superiore di Streamlit */
     header {{visibility: hidden;}}
 
-    /* TICKER FISSO IN ALTO */
+    /* TICKER: LA SCATOLA NERA IN ALTO */
     .ticker-wrap {{
         position: fixed;
         top: 0;
         left: 0;
-        width: 100%;
-        z-index: 999999;
+        width: 100vw;
+        height: 40px; /* Altezza fissa per bloccare la scatola */
         background-color: #0e1117;
         border-bottom: 2px solid #1f77b4;
-        padding: 8px 0;
+        z-index: 999999;
         overflow: hidden;
     }}
+    
+    /* TICKER: IL TESTO CHE SCORRE (Anti-Capo) */
     .ticker-text {{
-        display: inline-block;
-        padding-left: 100%;
-        animation: ticker 25s linear infinite;
+        position: absolute;
+        line-height: 40px; /* Centra il testo in verticale */
+        white-space: nowrap !important; /* IL SEGRETO: Impedisce l'effetto colonna! */
         font-family: 'Courier New', monospace;
         font-size: 16px;
         color: #00ff00;
         font-weight: bold;
+        animation: ticker 25s linear infinite;
     }}
+    
+    /* Nuovo motore di scorrimento più fluido */
     @keyframes ticker {{
-        0% {{ transform: translateX(0); }}
-        100% {{ transform: translateX(-100%); }}
+        0% {{ left: 100%; transform: translateX(0); }}
+        100% {{ left: 0; transform: translateX(-100%); }}
     }}
 
     /* LA CALAMITA PER I TAB */
-    /* Questo blocca la barra dei menu appena arriva a 38px dal bordo (sotto il ticker) */
-    div[data-baseweb="tab-list"] {{
+    div[data-testid="stTabs"] > div:first-child {{
         position: sticky !important;
-        top: 38px !important;
-        background-color: white !important; /* Metti #0e1117 se usi il tema scuro */
+        top: 40px !important; /* Si ferma esattamente sotto i 40px del ticker */
+        background-color: white !important; /* Essenziale per coprire i grafici */
         z-index: 9999 !important;
-        padding: 10px 0 !important;
-        border-bottom: 2px solid #f0f2f6 !important;
+        padding-top: 10px !important;
+        padding-bottom: 5px !important;
+        border-bottom: 1px solid #ddd !important;
     }}
 
-    /* Spazio per non far coprire il titolo iniziale dal ticker */
-    .main .block-container {{
-        padding-top: 4rem !important;
+    /* Spinge i contenuti giù all'inizio */
+    .block-container {{
+        padding-top: 3.5rem !important;
     }}
 </style>
 
 <div class="ticker-wrap"><div class="ticker-text">{ticker_text}</div></div>
 """, unsafe_allow_html=True)
 
-# 3. BARRA LATERALE (SIDEBAR) - IMPORTANTE: Non cancellarla!
+# 3. BARRA LATERALE
 with st.sidebar:
     st.header("⚙️ Impostazioni GGIV")
     capitale_iniziale = st.number_input("Capitale da Investire (€)", min_value=1000, value=100000, step=1000)
-    st.info("Regola il capitale per aggiornare i calcoli dell'indice in tempo reale.")
 
 # 4. TITOLO E TAB
 st.title("🛡️ GGIV - Graphene Global Index Vault")
 st.caption("Terminale Istituzionale Quantitativo. Connesso al Database Centrale.")
 
-# Definiamo i tab con i nomi che il tuo codice già usa
 tab_overview, tab_backtest, tab_rischio, tab_sentiment, tab_brevetti = st.tabs([
     "📊 Overview & DSRM", 
     "📉 Backtest & Stress Test", 
@@ -79,7 +82,6 @@ tab_overview, tab_backtest, tab_rischio, tab_sentiment, tab_brevetti = st.tabs([
     "📰 Radar Sentiment", 
     "🔬 Sensore Brevetti (IP)"
 ])
-
 import streamlit as st
 
 # ==========================================
