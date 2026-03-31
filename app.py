@@ -216,7 +216,7 @@ with tab_overview:
 # ==========================================
 # SCHEDA 2: SIMULAZIONI E BACKTEST
 # ==========================================
-with tab_simulazioni:
+with tab_backtest:
     st.header("📈 Backtest: GGIV vs S&P 500 (Ultimi 3 Anni)")
     date = pd.date_range(start="2021-01-01", periods=36, freq="ME")
     crescita_sp500 = np.linspace(100, 130, 36) + np.random.normal(0, 2, 36)
