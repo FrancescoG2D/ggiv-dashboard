@@ -12,6 +12,15 @@ st.set_page_config(page_title="GGIV Terminal", layout="wide")
 
 
 # ==========================================
+# 2. TITOLO GLOBALE (Visibile a tutti da subito!)
+# ==========================================
+# Spostando questo qui in alto, la schermata di login non sarà più anonima
+st.title("🛡️ GGIV - Graphene Global Index Vault")
+st.caption("Terminale Istituzionale Quantitativo. Connesso al Database Centrale.")
+
+
+
+# ==========================================
 # 2. IL TUO SISTEMA DI LOGIN (Muro di Sicurezza)
 # ==========================================
 # (Presumo tu abbia un if come questo per controllare l'accesso)
@@ -26,6 +35,11 @@ if not st.session_state.get('accesso_consentito', False):
             st.error("Accesso negato. Credenziali non valide.")
     
     st.stop() # <--- FINESTRA CHIUSA: Chi non ha la password si ferma qui.
+
+
+# ==========================================
+# ZONA PROTETTA: DA QUI IN POI VEDE TUTTO SOLO CHI È LOGGATO
+# ==========================================
 
 
 # ==========================================
@@ -57,11 +71,7 @@ if not df_aziende.empty:
 
 
 # ==========================================
-# ZONA PROTETTA: DA QUI IN POI VEDE TUTTO SOLO CHI È LOGGATO
-# ==========================================
-
-# ==========================================
-# 3. MOTORE GRAFICO: TICKER E CSS (Incollalo esattamente qui)
+# 5. MOTORE GRAFICO: TICKER E CSS
 # ==========================================
 ticker_text = "🟢 GGIV INDEX: 10,245.50 (+1.4%) &nbsp;&nbsp;&nbsp; | &nbsp;&nbsp;&nbsp; 🛡️ GOLDEN SHIELD: ATTIVO (40% ALLOCATO) &nbsp;&nbsp;&nbsp; | &nbsp;&nbsp;&nbsp; 🚀 TIER 1 PIONIERI: PESO OTTIMALE"
 
@@ -93,13 +103,26 @@ st.markdown(f"""
 
 
 # ==========================================
-# 4. LA TUA BARRA LATERALE ORIGINALE (Identica allo screenshot)
+# 6. SIDEBAR
 # ==========================================
 st.sidebar.image("https://img.icons8.com/color/96/000000/shield.png", width=80)
 st.sidebar.header("⚙️ Parametri Portafoglio")
 capitale_globale = st.sidebar.number_input("Capitale AUM (€):", min_value=1000, value=100000, step=1000)
 st.sidebar.markdown("---")
-# (Aggiungi qui altri elementi della tua sidebar se ne hai)
+
+
+# ==========================================
+# 7. CREAZIONE DEI TAB 
+# ==========================================
+# Devi assolutamente dichiarare queste variabili PRIMA di usare i "with"
+tab_overview, tab_backtest, tab_rischio, tab_sentiment, tab_brevetti = st.tabs([
+    "📊 Overview & DSRM", 
+    "📉 Backtest & Stress Test", 
+    "🧮 Rischio & Ordini", 
+    "📰 Radar Sentiment", 
+    "🔬 Sensore Brevetti (IP)"
+])
+
 
 
 # ==========================================
