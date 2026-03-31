@@ -107,17 +107,7 @@ st.markdown(f"""
         100% {{ transform: translateX(-100%); }}
     }}
 
-   /* SPOSTA IL BOTTONE DELLA SIDEBAR IN BASSO */
-    /* Uso due nomi diversi per coprire sia le versioni nuove che vecchie di Streamlit */
-    [data-testid="collapsedControl"], 
-    [data-testid="stSidebarCollapsedControl"] {
-        top: 60px !important; 
-        left: 15px !important;
-        z-index: 999999 !important; /* Lo tiene sempre in primo piano */
-        background-color: #0e1117 !important; /* Sfondo scuro per farlo risaltare */
-        border-radius: 5px !important;
-        border: 1px solid #1f77b4 !important; /* Bordino blu istituzionale */
-    }
+
     
 
     /* 2. FORGIA DELL'ANELLO (Visibile quando la sidebar è CHIUSA) */
