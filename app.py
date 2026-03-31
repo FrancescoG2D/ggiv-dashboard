@@ -71,76 +71,90 @@ if not df_aziende.empty:
 
 
 # ==========================================
-# 5. MOTORE GRAFICO: TICKER E L'ANELLO DEL POTERE
+# 5. UI ISTITUZIONALE: TICKER & ANELLO DEL POTERE
 # ==========================================
 ticker_text = "🟢 GGIV INDEX: 10,245.50 (+1.4%) &nbsp;&nbsp;&nbsp; | &nbsp;&nbsp;&nbsp; 🛡️ GOLDEN SHIELD: ATTIVO (40% ALLOCATO) &nbsp;&nbsp;&nbsp; | &nbsp;&nbsp;&nbsp; 🚀 TIER 1 PIONIERI: PESO OTTIMALE"
 
 st.markdown(f"""
 <style>
-    /* Nasconde solo la freccina originale, NON tutto l'header */
+    /* 1. FORZA IL TICKER IN PRIMISSIMO PIANO */
+    .ticker-wrap {{
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100vw !important;
+        height: 45px !important;
+        background-color: #0e1117 !important;
+        border-bottom: 2px solid #1f77b4 !important;
+        z-index: 9999999 !important; /* Livello massimo */
+        overflow: hidden !important;
+        display: flex !important;
+        align-items: center !important;
+    }}
+    
+    .ticker-text {{
+        white-space: nowrap !important;
+        font-family: 'Courier New', monospace !important;
+        font-size: 16px !important;
+        color: #00ff00 !important;
+        font-weight: bold !important;
+        animation: ticker 25s linear infinite !important;
+        position: absolute !important;
+    }}
+    
+    @keyframes ticker {{
+        0% {{ transform: translateX(100vw); }}
+        100% {{ transform: translateX(-100%); }}
+    }}
+
+    /* 2. FORGIA DELL'ANELLO (Visibile quando la sidebar è CHIUSA) */
+    [data-testid="collapsedControl"] {{
+        top: 65px !important; 
+        left: 0px !important; 
+        width: 60px !important;
+        height: 60px !important;
+        background: radial-gradient(circle, #ffdf00 0%, #b8860b 100%) !important;
+        border-radius: 0 50% 50% 0 !important; /* Forma a segnalibro tondo */
+        z-index: 10000000 !important; /* Sopra anche al ticker */
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        box-shadow: 0 0 15px rgba(255, 215, 0, 0.6) !important;
+        transition: all 0.3s ease-in-out !important;
+    }}
+
+    /* Inserisce l'Anello fisico */
+    [data-testid="collapsedControl"]::before {{
+        content: "💍" !important;
+        font-size: 30px !important;
+    }}
+
+    /* Nasconde la freccetta originale che darebbe fastidio */
     [data-testid="collapsedControl"] svg {{
         display: none !important;
     }}
 
-    /* TICKER FISSO IN ALTO */
-    .ticker-wrap {{
-        position: fixed; top: 0; left: 0; width: 100vw; height: 40px;
-        background-color: #0e1117; border-bottom: 2px solid #1f77b4; z-index: 999; overflow: hidden;
-    }}
-    .ticker-text {{
-        position: absolute; line-height: 40px; white-space: nowrap !important;
-        font-family: 'Courier New', monospace; font-size: 16px; color: #00ff00; font-weight: bold;
-        animation: ticker 25s linear infinite;
-    }}
-    @keyframes ticker {{
-        0% {{ left: 100%; transform: translateX(0); }}
-        100% {{ left: 0; transform: translateX(-100%); }}
-    }}
-    
-    /* CALAMITA PER I TAB */
-    div[data-testid="stTabs"] > div:first-child {{
-        position: sticky !important; top: 40px !important;
-        background-color: white !important; z-index: 9999 !important;
-        padding-top: 10px !important; padding-bottom: 5px !important; border-bottom: 1px solid #ddd !important;
-    }}
-    .block-container {{ padding-top: 3.5rem !important; }}
-
-    /* ==========================================
-       LA FORGIA DELL'ANELLO (Bottone Sidebar)
-       ========================================== */
-    
-    /* Trasforma il bottone in un segnalibro dorato */
-    [data-testid="collapsedControl"] {{
-        top: 60px !important; 
-        left: -15px !important; 
-        width: 65px !important;
-        height: 50px !important;
-        background: radial-gradient(circle, #ffdf00 0%, #b8860b 100%) !important; 
-        border: 2px solid #fff3a0 !important;
-        border-radius: 0 30px 30px 0 !important; 
-        box-shadow: 0px 4px 15px rgba(255, 215, 0, 0.4) !important; 
-        z-index: 999999 !important;
-        transition: all 0.3s ease !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: flex-end !important;
-        padding-right: 12px !important;
-    }}
-    
-    /* Inserisce fisicamente l'Anello */
-    [data-testid="collapsedControl"]::after {{
-        content: "💍"; 
-        font-size: 24px !important;
-        filter: drop-shadow(0 0 5px rgba(255,255,255,0.8));
-    }}
-    
-    /* L'Anello reagisce quando l'utente si avvicina (Hover) */
     [data-testid="collapsedControl"]:hover {{
-        left: 0px !important; 
-        box-shadow: 0px 0px 25px rgba(255, 215, 0, 1) !important; 
-        cursor: pointer !important;
+        transform: scale(1.1) !important;
+        box-shadow: 0 0 25px rgba(255, 215, 0, 1) !important;
+    }}
+
+    /* 3. CALAMITA PER I TAB */
+    div[data-testid="stTabs"] > div:first-child {{
+        position: sticky !important;
+        top: 45px !important; /* Appena sotto il ticker */
+        z-index: 999999 !important;
+        background-color: white !important;
+        padding: 10px 0 !important;
+        border-bottom: 2px solid #1f77b4 !important;
+    }}
+
+    /* Sposta il resto del contenuto per non farlo coprire */
+    .main .block-container {{
+        padding-top: 5rem !important;
     }}
 </style>
+
 <div class="ticker-wrap"><div class="ticker-text">{ticker_text}</div></div>
 """, unsafe_allow_html=True)
 
