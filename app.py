@@ -118,6 +118,7 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 
+# 4. tab"
     tab_overview, tab_backtest, tab_rischio, tab_sentiment, tab_brevetti = st.tabs([
     "📊 Overview & DSRM", 
     "📉 Backtest & Stress Test", 
