@@ -71,21 +71,22 @@ if not df_aziende.empty:
 
 
 # ==========================================
-# 5. MOTORE GRAFICO: TICKER E CSS
+# 5. MOTORE GRAFICO: TICKER E L'ANELLO DEL POTERE
 # ==========================================
 ticker_text = "🟢 GGIV INDEX: 10,245.50 (+1.4%) &nbsp;&nbsp;&nbsp; | &nbsp;&nbsp;&nbsp; 🛡️ GOLDEN SHIELD: ATTIVO (40% ALLOCATO) &nbsp;&nbsp;&nbsp; | &nbsp;&nbsp;&nbsp; 🚀 TIER 1 PIONIERI: PESO OTTIMALE"
 
 st.markdown(f"""
 <style>
-    header {{visibility: hidden;}}
-    .ticker-wrap {
+    /* Nasconde solo la freccina originale, NON tutto l'header */
+    [data-testid="collapsedControl"] svg {{
+        display: none !important;
+    }}
+
+    /* TICKER FISSO IN ALTO */
+    .ticker-wrap {{
         position: fixed; top: 0; left: 0; width: 100vw; height: 40px;
         background-color: #0e1117; border-bottom: 2px solid #1f77b4; z-index: 999; overflow: hidden;
-    }
-    /* Forza il bottone della sidebar a stare SOPRA al ticker animato */
-    [data-testid="collapsedControl"] {
-        z-index: 999999 !important; 
-    }
+    }}
     .ticker-text {{
         position: absolute; line-height: 40px; white-space: nowrap !important;
         font-family: 'Courier New', monospace; font-size: 16px; color: #00ff00; font-weight: bold;
@@ -95,53 +96,50 @@ st.markdown(f"""
         0% {{ left: 100%; transform: translateX(0); }}
         100% {{ left: 0; transform: translateX(-100%); }}
     }}
+    
+    /* CALAMITA PER I TAB */
     div[data-testid="stTabs"] > div:first-child {{
         position: sticky !important; top: 40px !important;
         background-color: white !important; z-index: 9999 !important;
         padding-top: 10px !important; padding-bottom: 5px !important; border-bottom: 1px solid #ddd !important;
     }}
     .block-container {{ padding-top: 3.5rem !important; }}
-    
+
     /* ==========================================
        LA FORGIA DELL'ANELLO (Bottone Sidebar)
        ========================================== */
-       
-    /* Nasconde la noiosa freccetta base di Streamlit */
-    [data-testid="collapsedControl"] svg {
-        display: none !important;
-    }
     
     /* Trasforma il bottone in un segnalibro dorato */
-    [data-testid="collapsedControl"] {
-        top: 60px !important; /* Lo spinge al sicuro sotto il Ticker nero/verde */
-        left: -15px !important; /* Lo tiene parzialmente nascosto a sinistra */
+    [data-testid="collapsedControl"] {{
+        top: 60px !important; 
+        left: -15px !important; 
         width: 65px !important;
         height: 50px !important;
-        background: radial-gradient(circle, #ffdf00 0%, #b8860b 100%) !important; /* Effetto oro fuso */
+        background: radial-gradient(circle, #ffdf00 0%, #b8860b 100%) !important; 
         border: 2px solid #fff3a0 !important;
-        border-radius: 0 30px 30px 0 !important; /* Arrotondato solo a destra come un segnalibro */
-        box-shadow: 0px 4px 15px rgba(255, 215, 0, 0.4) !important; /* Aura luminosa */
+        border-radius: 0 30px 30px 0 !important; 
+        box-shadow: 0px 4px 15px rgba(255, 215, 0, 0.4) !important; 
         z-index: 999999 !important;
         transition: all 0.3s ease !important;
         display: flex !important;
         align-items: center !important;
         justify-content: flex-end !important;
         padding-right: 12px !important;
-    }
+    }}
     
     /* Inserisce fisicamente l'Anello */
-    [data-testid="collapsedControl"]::after {
+    [data-testid="collapsedControl"]::after {{
         content: "💍"; 
         font-size: 24px !important;
         filter: drop-shadow(0 0 5px rgba(255,255,255,0.8));
-    }
+    }}
     
     /* L'Anello reagisce quando l'utente si avvicina (Hover) */
-    [data-testid="collapsedControl"]:hover {
-        left: 0px !important; /* Esce fuori dallo schermo per farsi cliccare */
-        box-shadow: 0px 0px 25px rgba(255, 215, 0, 1) !important; /* L'aura si accende */
+    [data-testid="collapsedControl"]:hover {{
+        left: 0px !important; 
+        box-shadow: 0px 0px 25px rgba(255, 215, 0, 1) !important; 
         cursor: pointer !important;
-    }
+    }}
 </style>
 <div class="ticker-wrap"><div class="ticker-text">{ticker_text}</div></div>
 """, unsafe_allow_html=True)
