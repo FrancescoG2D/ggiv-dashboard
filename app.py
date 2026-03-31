@@ -107,7 +107,7 @@ st.markdown(f"""
         100% {{ transform: translateX(-100%); }}
     }}
 
-/* SPOSTA IL BOTTONE DELLA SIDEBAR IN BASSO */
+   /* SPOSTA IL BOTTONE DELLA SIDEBAR IN BASSO */
     /* Uso due nomi diversi per coprire sia le versioni nuove che vecchie di Streamlit */
     [data-testid="collapsedControl"], 
     [data-testid="stSidebarCollapsedControl"] {
