@@ -101,6 +101,7 @@ st.markdown(f"""
         padding-top: 10px !important; padding-bottom: 5px !important; border-bottom: 1px solid #ddd !important;
     }}
     .block-container {{ padding-top: 3.5rem !important; }}
+    
     /* ==========================================
        LA FORGIA DELL'ANELLO (Bottone Sidebar)
        ========================================== */
