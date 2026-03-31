@@ -61,53 +61,83 @@ st.sidebar.info("📡 **Database Live**\nIl sistema è connesso al tuo Google Sh
 import streamlit as st
 
 # ==========================================
-# 1. IL TRUCCO CSS PER BLOCCARE LA SCATOLA IN ALTO
+# 1. IL TICKER ANIMATO E IL CSS DELLA CALAMITA
 # ==========================================
-st.markdown("""
-    <style>
-        /* Nasconde il menu base di Streamlit (i tre pallini in alto a dx) per pulire la vista */
-        header {visibility: hidden;}
-        
-        /* Cerca il contenitore con la nostra 'ancora-fissa' e lo inchioda in alto */
-        div[data-testid="stVerticalBlock"]:has(div.ancora-fissa) {
-            position: sticky;
-            top: 0px; /* NOTA: Se hai tenuto il ticker animato verde, cambia 0px con 45px */
-            background-color: white; /* Fondamentale: copre i grafici che scorrono sotto */
-            z-index: 999;
-            padding-top: 1rem;
-            padding-bottom: 0.5rem;
-            border-bottom: 2px solid #f0f2f6; /* Linea di separazione elegante */
-        }
-        
-        /* Assicura che anche la barra dei bottoni (Tab) non sia trasparente */
-        div[data-testid="stTabs"] > div[data-baseweb="tab-list"] {
-            background-color: white;
-        }
-    </style>
+ticker_text = "🟢 GGIV INDEX: 10,245.50 (+1.4%) &nbsp;&nbsp;&nbsp; | &nbsp;&nbsp;&nbsp; 🛡️ GOLDEN SHIELD: ATTIVO (40% ALLOCATO) &nbsp;&nbsp;&nbsp; | &nbsp;&nbsp;&nbsp; 🚀 TIER 1 PIONIERI: PESO OTTIMALE"
+
+st.markdown(f"""
+<style>
+    /* Spinge la dashboard giù per non farla coprire dal ticker */
+    .block-container {{
+        padding-top: 4rem !important; 
+    }}
+    
+    /* TICKER FISSO AL SOFFITTO */
+    .ticker-wrap {{
+        position: fixed;
+        top: 0; 
+        left: 0;
+        width: 100vw;
+        z-index: 999999;
+        background-color: #0e1117;
+        border-bottom: 2px solid #1f77b4;
+        padding: 8px 0;
+        overflow: hidden;
+        white-space: nowrap;
+    }}
+    .ticker-text {{
+        display: inline-block;
+        padding-left: 100%;
+        animation: ticker 25s linear infinite;
+        font-family: 'Courier New', Courier, monospace;
+        font-size: 16px;
+        font-weight: bold;
+        color: #00ff00;
+    }}
+    @keyframes ticker {{
+        0%   {{ transform: translate3d(0, 0, 0); }}
+        100% {{ transform: translate3d(-100%, 0, 0); }}
+    }}
+    
+    /* EFFETTO CALAMITA PER I TAB DI NAVIGAZIONE */
+    div[data-testid="stTabs"] > div[data-baseweb="tab-list"] {{
+        position: sticky;
+        top: 38px; /* Si blocca esattamente sotto al Ticker animato */
+        background-color: white; /* Cambia in #0e1117 se usi il tema scuro */
+        z-index: 99999;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        border-bottom: 2px solid #f0f2f6;
+    }}
+</style>
+
+<div class="ticker-wrap"><div class="ticker-text">{ticker_text}</div></div>
 """, unsafe_allow_html=True)
 
 
 # ==========================================
-# 2. CREAZIONE DEL CONTENITORE FISSO (LA SCATOLA)
+# 2. RIPRISTINO DELLA SIDEBAR LATERALE
 # ==========================================
-header_container = st.container()
+with st.sidebar:
+    st.header("⚙️ Impostazioni GGIV")
+    # Qui rimettiamo il tuo input per il capitale
+    capitale_iniziale = st.number_input("Capitale da Investire (€)", min_value=1000, value=100000, step=1000)
+    # (Se avevi altri selettori nella barra laterale, aggiungili qui sotto)
 
-with header_container:
-    # Questa è l'ancora invisibile che il CSS va a cercare per bloccare la scatola
-    st.markdown("<div class='ancora-fissa'></div>", unsafe_allow_html=True)
-    
-    # I tuoi titoli esatti
-    st.title("🛡️ GGIV - Graphene Global Index Vault")
-    st.caption("Terminale Istituzionale Quantitativo. Connesso al Database Centrale.")
-    
-   # Usiamo i nomi esatti che il resto del tuo codice sta cercando
-    tab_overview, tab_backtest, tab_rischio, tab_sentiment, tab_brevetti = st.tabs([
-        "📊 Overview & DSRM", 
-        "📉 Backtest & Stress Test", 
-        "🧮 Rischio & Ordini", 
-        "📰 Radar Sentiment", 
-        "🔬 Sensore Brevetti (IP)"
-    ])
+
+# ==========================================
+# 3. TITOLO E TAB
+# ==========================================
+st.title("🛡️ GGIV - Graphene Global Index Vault")
+st.caption("Terminale Istituzionale Quantitativo. Connesso al Database Centrale.")
+
+# I cassetti con i nomi corretti
+tab_overview, tab_backtest, tab_rischio, tab_sentiment, tab_brevetti = st.tabs([
+    "📊 Overview & DSRM", 
+    "📉 Backtest & Stress Test", 
+    "🧮 Rischio & Ordini", 
+    "📰 Radar Sentiment", 
+    "🔬 Sensore Brevetti (IP)"
 
 
 # ==========================================
