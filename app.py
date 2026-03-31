@@ -4,89 +4,28 @@ import plotly.express as px
 import yfinance as yf
 import numpy as np
 
-# 1. CONFIGURAZIONE PAGINA
+
+# ==========================================
+# 1. CONFIGURAZIONE (SEMPRE LA PRIMA RIGA)
+# ==========================================
 st.set_page_config(page_title="GGIV Terminal", layout="wide")
 
-# 2. TICKER E CSS "BLINDATO"
-ticker_text = "🟢 GGIV INDEX: 10,245.50 (+1.4%) &nbsp;&nbsp;&nbsp; | &nbsp;&nbsp;&nbsp; 🛡️ GOLDEN SHIELD: ATTIVO (40% ALLOCATO) &nbsp;&nbsp;&nbsp; | &nbsp;&nbsp;&nbsp; 🚀 TIER 1 PIONIERI: PESO OTTIMALE"
 
-st.markdown(f"""
-<style>
-    /* Nasconde la barra superiore di Streamlit */
-    header {{visibility: hidden;}}
-
-    /* TICKER: LA SCATOLA NERA IN ALTO */
-    .ticker-wrap {{
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100vw;
-        height: 40px; /* Altezza fissa per bloccare la scatola */
-        background-color: #0e1117;
-        border-bottom: 2px solid #1f77b4;
-        z-index: 999999;
-        overflow: hidden;
-    }}
+# ==========================================
+# 2. IL TUO SISTEMA DI LOGIN (Muro di Sicurezza)
+# ==========================================
+# (Presumo tu abbia un if come questo per controllare l'accesso)
+if not st.session_state.get('accesso_consentito', False):
+    st.write("Inserisci la password istituzionale per sbloccare l'algoritmo.")
+    password_inserita = st.text_input("Password di sblocco:", type="password")
+    if st.button("Accedi"):
+        if password_inserita == "Founder2026":
+            st.session_state.accesso_consentito = True
+            st.rerun()
+        else:
+            st.error("Accesso negato. Credenziali non valide.")
     
-    /* TICKER: IL TESTO CHE SCORRE (Anti-Capo) */
-    .ticker-text {{
-        position: absolute;
-        line-height: 40px; /* Centra il testo in verticale */
-        white-space: nowrap !important; /* IL SEGRETO: Impedisce l'effetto colonna! */
-        font-family: 'Courier New', monospace;
-        font-size: 16px;
-        color: #00ff00;
-        font-weight: bold;
-        animation: ticker 25s linear infinite;
-    }}
-    
-    /* Nuovo motore di scorrimento più fluido */
-    @keyframes ticker {{
-        0% {{ left: 100%; transform: translateX(0); }}
-        100% {{ left: 0; transform: translateX(-100%); }}
-    }}
-
-    /* LA CALAMITA PER I TAB */
-    div[data-testid="stTabs"] > div:first-child {{
-        position: sticky !important;
-        top: 40px !important; /* Si ferma esattamente sotto i 40px del ticker */
-        background-color: white !important; /* Essenziale per coprire i grafici */
-        z-index: 9999 !important;
-        padding-top: 10px !important;
-        padding-bottom: 5px !important;
-        border-bottom: 1px solid #ddd !important;
-    }}
-
-    /* Spinge i contenuti giù all'inizio */
-    .block-container {{
-        padding-top: 3.5rem !important;
-    }}
-</style>
-
-<div class="ticker-wrap"><div class="ticker-text">{ticker_text}</div></div>
-""", unsafe_allow_html=True)
-
-# 3. BARRA LATERALE
-with st.sidebar:
-    st.header("⚙️ Impostazioni GGIV")
-    capitale_iniziale = st.number_input("Capitale da Investire (€)", min_value=1000, value=100000, step=1000)
-
-# 4. TITOLO E TAB
-st.title("🛡️ GGIV - Graphene Global Index Vault")
-st.caption("Terminale Istituzionale Quantitativo. Connesso al Database Centrale.")
-
-tab_overview, tab_backtest, tab_rischio, tab_sentiment, tab_brevetti = st.tabs([
-    "📊 Overview & DSRM", 
-    "📉 Backtest & Stress Test", 
-    "🧮 Rischio & Ordini", 
-    "📰 Radar Sentiment", 
-    "🔬 Sensore Brevetti (IP)"
-])
-
-
-    
-
-import streamlit as st
+    st.stop() # <--- FINESTRA CHIUSA: Chi non ha la password si ferma qui.
 
 
 # ==========================================
@@ -117,35 +56,50 @@ if not df_aziende.empty:
     df_aziende['Percentuale_Persa'] = df_aziende['Peso_Base'] - df_aziende['Peso_Effettivo']
 
 
+# ==========================================
+# ZONA PROTETTA: DA QUI IN POI VEDE TUTTO SOLO CHI È LOGGATO
+# ==========================================
+
+# ==========================================
+# 3. MOTORE GRAFICO: TICKER E CSS (Incollalo esattamente qui)
+# ==========================================
+ticker_text = "🟢 GGIV INDEX: 10,245.50 (+1.4%) &nbsp;&nbsp;&nbsp; | &nbsp;&nbsp;&nbsp; 🛡️ GOLDEN SHIELD: ATTIVO (40% ALLOCATO) &nbsp;&nbsp;&nbsp; | &nbsp;&nbsp;&nbsp; 🚀 TIER 1 PIONIERI: PESO OTTIMALE"
+
+st.markdown(f"""
+<style>
+    header {{visibility: hidden;}}
+    .ticker-wrap {{
+        position: fixed; top: 0; left: 0; width: 100vw; height: 40px;
+        background-color: #0e1117; border-bottom: 2px solid #1f77b4; z-index: 999999; overflow: hidden;
+    }}
+    .ticker-text {{
+        position: absolute; line-height: 40px; white-space: nowrap !important;
+        font-family: 'Courier New', monospace; font-size: 16px; color: #00ff00; font-weight: bold;
+        animation: ticker 25s linear infinite;
+    }}
+    @keyframes ticker {{
+        0% {{ left: 100%; transform: translateX(0); }}
+        100% {{ left: 0; transform: translateX(-100%); }}
+    }}
+    div[data-testid="stTabs"] > div:first-child {{
+        position: sticky !important; top: 40px !important;
+        background-color: white !important; z-index: 9999 !important;
+        padding-top: 10px !important; padding-bottom: 5px !important; border-bottom: 1px solid #ddd !important;
+    }}
+    .block-container {{ padding-top: 3.5rem !important; }}
+</style>
+<div class="ticker-wrap"><div class="ticker-text">{ticker_text}</div></div>
+""", unsafe_allow_html=True)
 
 
-# --- SISTEMA DI SICUREZZA ---
-if "accesso_consentito" not in st.session_state:
-    st.session_state.accesso_consentito = False
-
-if not st.session_state.accesso_consentito:
-    st.title("🔒 Accesso Riservato GGIV")
-    st.write("Inserisci la password istituzionale per sbloccare l'algoritmo.")
-    password_inserita = st.text_input("Password di sblocco:", type="password", key="login")
-    if st.button("Accedi"):
-        if password_inserita == "Founder2026": 
-            st.session_state.accesso_consentito = True
-            st.rerun()
-        else:
-            st.error("Accesso negato. Credenziali non valide.")
-    st.stop()
-
-
-
-
-# --- SIDEBAR GLOBALE ---
+# ==========================================
+# 4. LA TUA BARRA LATERALE ORIGINALE (Identica allo screenshot)
+# ==========================================
 st.sidebar.image("https://img.icons8.com/color/96/000000/shield.png", width=80)
 st.sidebar.header("⚙️ Parametri Portafoglio")
-capitale_globale = st.sidebar.number_input("Capitale AUM (€):", min_value=1000, value=50000, step=1000)
+capitale_globale = st.sidebar.number_input("Capitale AUM (€):", min_value=1000, value=100000, step=1000)
 st.sidebar.markdown("---")
-st.sidebar.info("📡 **Database Live**\nIl sistema è connesso al tuo Google Sheets. Aggiorna il file per modificare l'indice in tempo reale.")
-
-import streamlit as st
+# (Aggiungi qui altri elementi della tua sidebar se ne hai)
 
 
 # ==========================================
