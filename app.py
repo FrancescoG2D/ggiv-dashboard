@@ -101,6 +101,46 @@ st.markdown(f"""
         padding-top: 10px !important; padding-bottom: 5px !important; border-bottom: 1px solid #ddd !important;
     }}
     .block-container {{ padding-top: 3.5rem !important; }}
+    /* ==========================================
+       LA FORGIA DELL'ANELLO (Bottone Sidebar)
+       ========================================== */
+       
+    /* Nasconde la noiosa freccetta base di Streamlit */
+    [data-testid="collapsedControl"] svg {
+        display: none !important;
+    }
+    
+    /* Trasforma il bottone in un segnalibro dorato */
+    [data-testid="collapsedControl"] {
+        top: 60px !important; /* Lo spinge al sicuro sotto il Ticker nero/verde */
+        left: -15px !important; /* Lo tiene parzialmente nascosto a sinistra */
+        width: 65px !important;
+        height: 50px !important;
+        background: radial-gradient(circle, #ffdf00 0%, #b8860b 100%) !important; /* Effetto oro fuso */
+        border: 2px solid #fff3a0 !important;
+        border-radius: 0 30px 30px 0 !important; /* Arrotondato solo a destra come un segnalibro */
+        box-shadow: 0px 4px 15px rgba(255, 215, 0, 0.4) !important; /* Aura luminosa */
+        z-index: 999999 !important;
+        transition: all 0.3s ease !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: flex-end !important;
+        padding-right: 12px !important;
+    }
+    
+    /* Inserisce fisicamente l'Anello */
+    [data-testid="collapsedControl"]::after {
+        content: "💍"; 
+        font-size: 24px !important;
+        filter: drop-shadow(0 0 5px rgba(255,255,255,0.8));
+    }
+    
+    /* L'Anello reagisce quando l'utente si avvicina (Hover) */
+    [data-testid="collapsedControl"]:hover {
+        left: 0px !important; /* Esce fuori dallo schermo per farsi cliccare */
+        box-shadow: 0px 0px 25px rgba(255, 215, 0, 1) !important; /* L'aura si accende */
+        cursor: pointer !important;
+    }
 </style>
 <div class="ticker-wrap"><div class="ticker-text">{ticker_text}</div></div>
 """, unsafe_allow_html=True)
