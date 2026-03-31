@@ -131,19 +131,18 @@ with st.sidebar:
 st.title("🛡️ GGIV - Graphene Global Index Vault")
 st.caption("Terminale Istituzionale Quantitativo. Connesso al Database Centrale.")
 
-# I cassetti con i nomi corretti
 tab_overview, tab_backtest, tab_rischio, tab_sentiment, tab_brevetti = st.tabs([
     "📊 Overview & DSRM", 
     "📉 Backtest & Stress Test", 
     "🧮 Rischio & Ordini", 
     "📰 Radar Sentiment", 
     "🔬 Sensore Brevetti (IP)"
+])
 
 
 # ==========================================
 # 3. IL CONTENUTO CHE PUÒ SCORRERE LIBERAMENTE
 # ==========================================
-
 
 
 
