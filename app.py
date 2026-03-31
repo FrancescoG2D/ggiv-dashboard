@@ -61,18 +61,22 @@ st.sidebar.info("📡 **Database Live**\nIl sistema è connesso al tuo Google Sh
 import streamlit as st
 
 # ==========================================
-# 1. IL TICKER ANIMATO E IL CSS DELLA CALAMITA
+# 0. IMPOSTAZIONE PAGINA (DEVE ESSERE LA PRIMA RIGA)
+# ==========================================
+st.set_page_config(page_title="GGIV Terminal", layout="wide")
+
+
+# ==========================================
+# 1. TICKER ANIMATO E REGOLE GRAFICHE
 # ==========================================
 ticker_text = "🟢 GGIV INDEX: 10,245.50 (+1.4%) &nbsp;&nbsp;&nbsp; | &nbsp;&nbsp;&nbsp; 🛡️ GOLDEN SHIELD: ATTIVO (40% ALLOCATO) &nbsp;&nbsp;&nbsp; | &nbsp;&nbsp;&nbsp; 🚀 TIER 1 PIONIERI: PESO OTTIMALE"
 
 st.markdown(f"""
 <style>
-    /* Spinge la dashboard giù per non farla coprire dal ticker */
-    .block-container {{
-        padding-top: 4rem !important; 
-    }}
-    
-    /* TICKER FISSO AL SOFFITTO */
+    /* Nasconde il menu base di Streamlit per pulizia */
+    header {{visibility: hidden;}}
+
+    /* 1. TICKER FISSO IN CIMA AL SOFFITTO */
     .ticker-wrap {{
         position: fixed;
         top: 0; 
@@ -98,16 +102,27 @@ st.markdown(f"""
         0%   {{ transform: translate3d(0, 0, 0); }}
         100% {{ transform: translate3d(-100%, 0, 0); }}
     }}
-    
-    /* EFFETTO CALAMITA PER I TAB DI NAVIGAZIONE */
-    div[data-testid="stTabs"] > div[data-baseweb="tab-list"] {{
+
+    /* 2. TRUCCO PER BLOCCARE TITOLO E TAB INSIEME */
+    /* Cerca la nostra scatola e la inchioda sotto al ticker (a 38px di distanza) */
+    div[data-testid="stVerticalBlock"]:has(div.ancora-fissa) {{
         position: sticky;
-        top: 38px; /* Si blocca esattamente sotto al Ticker animato */
-        background-color: white; /* Cambia in #0e1117 se usi il tema scuro */
+        top: 38px; 
+        background-color: white; /* Fondamentale per nascondere i grafici che scorrono sotto */
         z-index: 99999;
-        padding-top: 10px;
-        padding-bottom: 10px;
+        padding-top: 1rem;
+        padding-bottom: 0rem;
         border-bottom: 2px solid #f0f2f6;
+    }}
+    
+    /* Assicura che i bottoni dei tab abbiano lo sfondo bianco */
+    div[data-testid="stTabs"] > div[data-baseweb="tab-list"] {{
+        background-color: white;
+    }}
+    
+    /* Spinge i grafici un po' più giù all'inizio per non farli partire nascosti */
+    .block-container {{
+        padding-top: 5rem !important; 
     }}
 </style>
 
@@ -116,29 +131,34 @@ st.markdown(f"""
 
 
 # ==========================================
-# 2. RIPRISTINO DELLA SIDEBAR LATERALE
+# 2. SIDEBAR (LA TUA BARRA LATERALE)
 # ==========================================
 with st.sidebar:
     st.header("⚙️ Impostazioni GGIV")
-    # Qui rimettiamo il tuo input per il capitale
     capitale_iniziale = st.number_input("Capitale da Investire (€)", min_value=1000, value=100000, step=1000)
-    # (Se avevi altri selettori nella barra laterale, aggiungili qui sotto)
+    # Eventuali altri comandi della sidebar vanno qui
 
 
 # ==========================================
-# 3. TITOLO E TAB
+# 3. IL BLOCCO FISSO: TITOLO + TAB
 # ==========================================
-st.title("🛡️ GGIV - Graphene Global Index Vault")
-st.caption("Terminale Istituzionale Quantitativo. Connesso al Database Centrale.")
+# Creiamo la "scatola" che il CSS andrà a bloccare
+header_container = st.container()
 
-tab_overview, tab_backtest, tab_rischio, tab_sentiment, tab_brevetti = st.tabs([
-    "📊 Overview & DSRM", 
-    "📉 Backtest & Stress Test", 
-    "🧮 Rischio & Ordini", 
-    "📰 Radar Sentiment", 
-    "🔬 Sensore Brevetti (IP)"
-])
-
+with header_container:
+    # Questa è l'ancora invisibile letta dal CSS
+    st.markdown("<div class='ancora-fissa'></div>", unsafe_allow_html=True)
+    
+    st.title("🛡️ GGIV - Graphene Global Index Vault")
+    st.caption("Terminale Istituzionale Quantitativo. Connesso al Database Centrale.")
+    
+    tab_overview, tab_backtest, tab_rischio, tab_sentiment, tab_brevetti = st.tabs([
+        "📊 Overview & DSRM", 
+        "📉 Backtest & Stress Test", 
+        "🧮 Rischio & Ordini", 
+        "📰 Radar Sentiment", 
+        "🔬 Sensore Brevetti (IP)"
+    ])
 
 # ==========================================
 # 3. IL CONTENUTO CHE PUÒ SCORRERE LIBERAMENTE
