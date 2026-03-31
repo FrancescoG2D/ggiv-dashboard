@@ -78,10 +78,14 @@ ticker_text = "🟢 GGIV INDEX: 10,245.50 (+1.4%) &nbsp;&nbsp;&nbsp; | &nbsp;&nb
 st.markdown(f"""
 <style>
     header {{visibility: hidden;}}
-    .ticker-wrap {{
+    .ticker-wrap {
         position: fixed; top: 0; left: 0; width: 100vw; height: 40px;
-        background-color: #0e1117; border-bottom: 2px solid #1f77b4; z-index: 999999; overflow: hidden;
-    }}
+        background-color: #0e1117; border-bottom: 2px solid #1f77b4; z-index: 999; overflow: hidden;
+    }
+    /* Forza il bottone della sidebar a stare SOPRA al ticker animato */
+    [data-testid="collapsedControl"] {
+        z-index: 999999 !important; 
+    }
     .ticker-text {{
         position: absolute; line-height: 40px; white-space: nowrap !important;
         font-family: 'Courier New', monospace; font-size: 16px; color: #00ff00; font-weight: bold;
