@@ -8,57 +8,6 @@ st.set_page_config(page_title="GGIV Dashboard", layout="wide")
 
 import streamlit as st
 
-# --- INIZIO EFFETTO TICKER IN SOVRAIMPRESSIONE ---
-
-ticker_text = "🟢 GGIV INDEX: 10,245.50 (+1.4%) &nbsp;&nbsp;&nbsp; | &nbsp;&nbsp;&nbsp; 🛡️ GOLDEN SHIELD: ATTIVO (40% ALLOCATO) &nbsp;&nbsp;&nbsp; | &nbsp;&nbsp;&nbsp; 🚀 TIER 1 PIONIERI: PESO OTTIMALE &nbsp;&nbsp;&nbsp; | &nbsp;&nbsp;&nbsp; 🧠 HEALTH SCORE MEDIO: 88/100"
-
-st.markdown(f"""
-<style>
-    /* 1. Spinge il contenuto della dashboard in basso per fare spazio al ticker */
-    .block-container {{
-        padding-top: 6rem !important; 
-    }}
-    
-    /* 2. Inchioda il ticker allo schermo, appena sotto l'header nativo di Streamlit */
-    .ticker-wrap {{
-        position: fixed;
-        top: 2.875rem; /* Lascia esattamente lo spazio per i selettori di pagina in alto */
-        left: 0;
-        width: 100vw; /* Prende tutta la larghezza del monitor */
-        z-index: 999999; /* Lo mette in primo piano sopra a qualsiasi grafico */
-        background-color: #0e1117;
-        border-bottom: 2px solid #1f77b4;
-        border-top: 1px solid #333;
-        padding: 10px 0;
-        overflow: hidden;
-        white-space: nowrap;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.5); /* Effetto ombra per staccarlo dallo sfondo */
-    }}
-    
-    /* 3. Il testo e l'animazione */
-    .ticker-text {{
-        display: inline-block;
-        padding-left: 100%;
-        animation: ticker 25s linear infinite;
-        font-family: 'Courier New', Courier, monospace;
-        font-size: 16px;
-        font-weight: bold;
-        color: #00ff00;
-    }}
-    
-    @keyframes ticker {{
-        0%   {{ transform: translate3d(0, 0, 0); }}
-        100% {{ transform: translate3d(-100%, 0, 0); }}
-    }}
-</style>
-
-<div class="ticker-wrap">
-    <div class="ticker-text">{ticker_text}</div>
-</div>
-""", unsafe_allow_html=True)
-
-# --- FINE EFFETTO TICKER ---
-
 # ==========================================
 # 🔗 CONFIGURAZIONE DATABASE (GOOGLE SHEETS)
 # ==========================================
