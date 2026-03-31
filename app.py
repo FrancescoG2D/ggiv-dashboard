@@ -144,7 +144,7 @@ tab_overview, tab_backtest, tab_rischio, tab_sentiment, tab_brevetti = st.tabs([
 # 3. IL CONTENUTO CHE PUÒ SCORRERE LIBERAMENTE
 # ==========================================
 
-    st.write("Contenuto dell'Overview (Prova a inserire tanti dati e scorri giù...)")
+
 
 
 # ==========================================
