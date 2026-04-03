@@ -11,6 +11,11 @@ import numpy as np
 st.set_page_config(page_title="GGIV Terminal", layout="wide")
 
 
+# =======================================================
+# 2. LA CONNESSIONE VA INSERITA ESATTAMENTE QUI
+# =======================================================
+conn = st.connection("gsheets", type=GSheetsConnection)
+
 # ==========================================
 # 2. TITOLO GLOBALE (Visibile a tutti da subito!)
 # ==========================================
