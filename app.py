@@ -58,12 +58,6 @@ def carica_database(url):
 df_aziende = carica_database(URL_DATABASE)
 
 
-import streamlit as st
-import pandas as pd
-from datetime import datetime
-
-# ... (qui tieni il tuo codice di connessione a Google Sheets) ...
-
 # 1. CREAZIONE DELLE SCHEDE (TABS)
 tab1, tab2 = st.tabs(["📈 Core Portfolio (Database)", "🔭 Incubatore (Watchlist)"])
 
