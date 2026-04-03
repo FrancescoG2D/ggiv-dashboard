@@ -31,8 +31,8 @@ if not st.session_state.get('accesso_consentito', False):
 # 3. CONNESSIONE AL DATABASE (LINK CSV DIRETTI)
 # ==========================================
 # 🟢 INCOLLA QUI TRA LE VIRGOLETTE I DUE LINK "PUBBLICA SUL WEB" 🟢
-url_db = https://docs.google.com/spreadsheets/d/e/2PACX-1vQPnMivIJ1O9GbdTbjkrVa8InhtJ6qm1UNwrU__0bOrikkWXkJA638y6tu6Ej0hRUXeKGEQsWP8E6dX/pub?gid=0&single=true&output=csv
-url_wl = https://docs.google.com/spreadsheets/d/e/2PACX-1vQPnMivIJ1O9GbdTbjkrVa8InhtJ6qm1UNwrU__0bOrikkWXkJA638y6tu6Ej0hRUXeKGEQsWP8E6dX/pub?gid=577137332&single=true&output=csv
+url_db = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQPnMivIJ1O9GbdTbjkrVa8InhtJ6qm1UNwrU__0bOrikkWXkJA638y6tu6Ej0hRUXeKGEQsWP8E6dX/pub?gid=0&single=true&output=csv"
+url_wl = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQPnMivIJ1O9GbdTbjkrVa8InhtJ6qm1UNwrU__0bOrikkWXkJA638y6tu6Ej0hRUXeKGEQsWP8E6dX/pub?gid=577137332&single=true&output=csv"
 
 @st.cache_data(ttl=60)
 def carica_dati(url):
