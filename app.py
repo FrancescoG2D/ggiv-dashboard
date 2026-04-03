@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.express as px
 import yfinance as yf
 import numpy as np
-
+from streamlit_gsheets import GSheetsConnection
 
 # ==========================================
 # 1. CONFIGURAZIONE (SEMPRE LA PRIMA RIGA)
