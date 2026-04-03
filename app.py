@@ -73,7 +73,7 @@ def elabora_dati(df):
     df['Giorni_Silenzio'] = df['Giorni_Silenzio'].fillna(999).astype(int)
     return df
 
-# --- SCHEDA 1: DATABASE PRINCIPALE ---
+# --- SCHEDA 1: DATABASE ---
 with tab1:
     st.header("Stato del Fondo GGIV")
     # Carica il foglio 'Database'
