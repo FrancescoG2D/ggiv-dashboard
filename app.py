@@ -57,6 +57,52 @@ def carica_database(url):
 
 df_aziende = carica_database(URL_DATABASE)
 
+
+import streamlit as st
+import pandas as pd
+from datetime import datetime
+
+# ... (qui tieni il tuo codice di connessione a Google Sheets) ...
+
+# 1. CREAZIONE DELLE SCHEDE (TABS)
+tab1, tab2 = st.tabs(["📈 Core Portfolio (Database)", "🔭 Incubatore (Watchlist)"])
+
+def elabora_dati(df):
+    # Trasforma la colonna in formato data reale per Python
+    df['Data_Ultima_News'] = pd.to_datetime(df['Data_Ultima_News'], errors='coerce')
+    
+    # Calcola i giorni di silenzio in tempo reale
+    oggi = datetime.now()
+    df['Giorni_Silenzio'] = (oggi - df['Data_Ultima_News']).dt.days
+    
+    # Se la data manca, mette un valore alto per sicurezza
+    df['Giorni_Silenzio'] = df['Giorni_Silenzio'].fillna(999).astype(int)
+    return df
+
+# --- SCHEDA 1: DATABASE PRINCIPALE ---
+with tab1:
+    st.header("Stato del Fondo GGIV")
+    # Carica il foglio 'Database'
+    data_db = conn.read(worksheet="Database")
+    df_db = elabora_dati(pd.DataFrame(data_db))
+    
+    # Visualizza la tabella con i calcoli aggiornati
+    st.dataframe(df_db.style.apply(lambda x: ['background-color: #ff4b4b' if x.Giorni_Silenzio > 90 else '' for i in x], axis=1))
+
+# --- SCHEDA 2: WATCHLIST ---
+with tab2:
+    st.header("Aziende in Osservazione")
+    # Carica il foglio 'Watchlist'
+    data_wl = conn.read(worksheet="Watchlist")
+    df_wl = elabora_dati(pd.DataFrame(data_wl))
+    
+    if not df_wl.empty:
+        st.write("Queste aziende sono sotto scansione radar per un eventuale ingresso nel Tier 3.")
+        st.table(df_wl[['Ticker', 'Azienda', 'Data_Ultima_News', 'Giorni_Silenzio']])
+    else:
+        st.info("La Watchlist è attualmente vuota.")
+
+
 # --- LOGICA DSRM AUTOMATICA ---
 def applica_dsrm(giorni):
     if giorni <= 45: return 1.0
