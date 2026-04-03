@@ -80,21 +80,20 @@ with tab1:
     data_db = conn.read(worksheet="Database")
     df_db = elabora_dati(pd.DataFrame(data_db))
 
-# --- LOGICA DSRM AUTOMATICA ---
-def applica_dsrm(giorni):
-    if giorni <= 45: return 1.0
-    elif giorni <= 90: return 0.75
-    else: return 0.0
+    # --- LOGICA DSRM AUTOMATICA ---
+    def applica_dsrm(giorni):
+        if giorni <= 45: return 1.0
+        elif giorni <= 90: return 0.75
+        else: return 0.0
 
-if not df_aziende.empty:
-    df_aziende['Fattore_DSRM'] = df_aziende['Giorni_Silenzio'].apply(applica_dsrm)
-    df_aziende['Peso_Effettivo'] = df_aziende['Peso_Base'] * df_aziende['Fattore_DSRM']
-    # Calcolo dei capitali spostati dallo scudo per le statistiche
-    df_aziende['Percentuale_Persa'] = df_aziende['Peso_Base'] - df_aziende['Peso_Effettivo']
-    
-    # Visualizza la tabella con i calcoli aggiornati
-    st.dataframe(df_db.style.apply(lambda x: ['background-color: #ff4b4b' if x.Giorni_Silenzio > 90 else '' for i in x], axis=1))
+    if not df_db.empty:
+        df_db['Fattore_DSRM'] = df_db['Giorni_Silenzio'].apply(applica_dsrm)
+        df_db['Peso_Effettivo'] = df_db['Peso_Base'] * df_db['Fattore_DSRM']
+        # Calcolo dei capitali spostati dallo scudo per le statistiche
+        df_db['Percentuale_Persa'] = df_db['Peso_Base'] - df_db['Peso_Effettivo']
 
+        # Visualizza la tabella con i calcoli aggiornati
+        st.dataframe(df_db.style.apply(lambda x: ['background-color: #ff4b4b' if x.Giorni_Silenzio > 90 else '' for i in x], axis=1))
 # --- SCHEDA 2: WATCHLIST ---
 with tab2:
     st.header("Aziende in Osservazione")
