@@ -78,7 +78,7 @@ def elabora_dati(df):
     df['Giorni_Silenzio'] = df['Giorni_Silenzio'].fillna(999).astype(int)
     return df
 
-# --- SCHEDA 1: DATABASE PRINCIPALE---
+# --- SCHEDA 1: DATABASE PRINCIPALE ---
 with tab1:
     st.header("Stato del Fondo GGIV")
     # Carica il foglio 'Database'
@@ -99,6 +99,7 @@ with tab1:
 
         # Visualizza la tabella con i calcoli aggiornati
         st.dataframe(df_db.style.apply(lambda x: ['background-color: #ff4b4b' if x.Giorni_Silenzio > 90 else '' for i in x], axis=1))
+
 # --- SCHEDA 2: WATCHLIST ---
 with tab2:
     st.header("Aziende in Osservazione")
@@ -154,7 +155,6 @@ st.markdown(f"""
     }}
 
 
-    
 
     /* 2. FORGIA DELL'ANELLO (Visibile quando la sidebar è CHIUSA) */
     [data-testid="collapsedControl"] {{
