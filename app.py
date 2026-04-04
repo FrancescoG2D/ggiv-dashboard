@@ -51,11 +51,20 @@ df_wl = carica_dati(url_wl)
 # ==========================================
 def elabora_dati(df):
     if df.empty: return df
+    
     if 'Data_Ultima_News' in df.columns:
-        df['Data_Ultima_News'] = pd.to_datetime(df['Data_Ultima_News'], errors='coerce')
-        oggi = datetime.now()
+        # 1. Forza la lettura nel formato Europeo (Giorno prima del Mese)
+        df['Data_Ultima_News'] = pd.to_datetime(df['Data_Ultima_News'], dayfirst=True, errors='coerce')
+        
+        # 2. Normalizza l'orologio: taglia via ore e minuti annullando i problemi di fuso orario
+        oggi = pd.Timestamp.now().normalize()
+        
+        # 3. Calcolo chirurgico dei giorni netti
         df['Giorni_Silenzio'] = (oggi - df['Data_Ultima_News']).dt.days
+        
+        # 4. Se la data è mancante, inserisce 999 per attivare il Kill Switch per sicurezza
         df['Giorni_Silenzio'] = df['Giorni_Silenzio'].fillna(999).astype(int)
+        
     return df
 
 def applica_dsrm(giorni):
