@@ -118,10 +118,27 @@ with tab_overview:
     st.header("🚦 Motore Quantitativo & DSRM")
     
     if not df_aziende.empty:
-        # Mostra tabella colorata
-        st.dataframe(df_aziende.style.apply(lambda x: ['background-color: #ff4b4b' if i==True else '' for i in (x == x)], axis=1, subset=pd.IndexSlice[df_aziende['Giorni_Silenzio'] > 90, :]))
+        # 1. Creazione del sistema a Semaforo
+        def genera_semaforo(giorni):
+            if giorni <= 45: return "🟢"
+            elif giorni <= 90: return "🟡"
+            else: return "🔴"
+            
+        df_aziende['Status'] = df_aziende['Giorni_Silenzio'].apply(genera_semaforo)
         
+        # 2. Selezione chirurgica delle colonne da mostrare
+        colonne_eleganti = ['Status', 'Ticker', 'Azienda', 'Tier', 'Giorni_Silenzio', 'Peso_Effettivo']
+        df_display = df_aziende[colonne_eleganti].copy()
+        
+        # Rinominiamo le colonne per renderle più leggibili all'investitore
+        df_display.rename(columns={'Giorni_Silenzio': 'Giorni Silenzio', 'Peso_Effettivo': 'Peso Reale (%)'}, inplace=True)
+        
+        # 3. Mostra la tabella pulita, nascondendo i numeri di riga (hide_index)
+        st.dataframe(df_display, use_container_width=True, hide_index=True)
+        
+        # --- (Il resto del codice rimane uguale da qui in giù) ---
         aziende_penalizzate = df_aziende[df_aziende['Fattore_DSRM'] < 1.0]
+        capitale_salvato_totale = (df_aziende['Percentuale_Persa'].sum() / 100) * capitale_globale
         capitale_salvato_totale = (df_aziende['Percentuale_Persa'].sum() / 100) * capitale_globale
 
         col_dsrm1, col_dsrm2 = st.columns(2)
