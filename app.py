@@ -198,7 +198,7 @@ with tab_rischio:
         else: st.success(f"🟢 GOLDEN SHIELD: Tier 3 al {peso_totale_shield:.1f}%.")
 
         somma_pesi = df_aziende['Peso_Effettivo'].sum()
-        df_aziende['Peso_Normalizzato'] = (df_aziende['Peso_Effettivo'] / somma_pesi) * 100 if somma_pesi > 0 else 0
+        df_aziende['Azioni'] = (df_aziende['Budget_€'] / df_aziende['Prezzo_LIVE_$']).round(4)
 
         if not blocco_scudo and st.button("Calcola Lotti"):
             with st.spinner('Scaricando prezzi...'):
