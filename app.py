@@ -198,14 +198,22 @@ with tab_rischio:
         else: st.success(f"🟢 GOLDEN SHIELD: Tier 3 al {peso_totale_shield:.1f}%.")
 
         somma_pesi = df_aziende['Peso_Effettivo'].sum()
-        df_aziende['Azioni'] = (df_aziende['Budget_€'] / df_aziende['Prezzo_LIVE_$']).round(4)
+        df_aziende['Peso_Normalizzato'] = (df_aziende['Peso_Effettivo'] / somma_pesi) * 100 if somma_pesi > 0 else 0
 
+        # TUTTI I CALCOLI SONO PROTETTI DENTRO IL BOTTONE
         if not blocco_scudo and st.button("Calcola Lotti"):
-            with st.spinner('Scaricando prezzi...'):
+            with st.spinner('Scaricando prezzi dal mercato in tempo reale...'):
+                # 1. Scarica i prezzi
                 df_aziende['Prezzo_LIVE_$'] = df_aziende['Ticker'].apply(lambda t: round(yf.Ticker(t).history(period="1d")['Close'].iloc[-1], 2) if len(yf.Ticker(t).history(period="1d")) > 0 else 0.001)
+                
+                # 2. Assegna il budget
                 df_aziende['Budget_€'] = capitale_globale * (df_aziende['Peso_Normalizzato'] / 100)
-                df_aziende['Azioni'] = (df_aziende['Budget_€'] / df_aziende['Prezzo_LIVE_$']).astype(int)
-                st.table(df_aziende[df_aziende['Azioni'] > 0][['Ticker', 'Azienda', 'Prezzo_LIVE_$', 'Budget_€', 'Azioni']])
+                
+                # 3. Calcola le azioni (con 4 decimali, allineato correttamente)
+                df_aziende['Azioni'] = (df_aziende['Budget_€'] / df_aziende['Prezzo_LIVE_$']).round(4)
+                
+                # 4. Mostra la tabella finale formattata in modo pulito
+                st.dataframe(df_aziende[df_aziende['Azioni'] > 0][['Ticker', 'Azienda', 'Prezzo_LIVE_$', 'Budget_€', 'Azioni']], use_container_width=True, hide_index=True)
 
 # --- SCHEDA 5 & 6 ---
 with tab_sentiment:
