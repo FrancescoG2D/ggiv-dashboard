@@ -332,10 +332,11 @@ st.sidebar.markdown(f'<p style="font-size:10px; color:#7a8fa6;">Ultimo aggiornam
 # ==========================================
 # 8. SCHEDE
 # ==========================================
-tab_overview, tab_watchlist, tab_backtest, tab_rischio, tab_sentiment, tab_brevetti = st.tabs([
+tab_overview, tab_watchlist, tab_backtest, tab_correlazione, tab_rischio, tab_sentiment, tab_brevetti = st.tabs([
     "DATABASE & DSRM",
     "INCUBATORE",
     "BACKTEST & STRESS",
+    "CORRELAZIONE & MACRO",
     "RISCHIO & ORDINI",
     "RADAR SENTIMENT",
     "SENSORE BREVETTI"
@@ -498,7 +499,237 @@ with tab_backtest:
     col_c2.metric("IMPATTO TIER 3", f"{-crollo * 0.2:.1f}%", "protezione shield")
     col_c3.metric("IMPATTO NETTO", f"€ {capitale_globale * (impatto_tot / 100):,.0f}", f"{impatto_tot:.1f}%")
 
-# --- SCHEDA 4: RISCHIO & ORDINI ---
+# --- SCHEDA 4: CORRELAZIONE & MACRO ---
+with tab_correlazione:
+
+    # ---- SEZIONE A: SENSORE MACRO ----
+    st.markdown("### SENSORE MACRO — CONTESTO DI MERCATO")
+
+    @st.cache_data(ttl=300)
+    def get_macro_data():
+        """Scarica VIX e Treasury 10Y. Restituisce dizionario con valori e variazioni."""
+        risultati = {}
+        macro_tickers = {
+            'VIX': '^VIX',
+            'TREASURY_10Y': '^TNX',
+            'DXY': 'DX-Y.NYB',
+        }
+        for nome, ticker in macro_tickers.items():
+            try:
+                d = yf.Ticker(ticker).history(period="5d")
+                if len(d) >= 2:
+                    val = d['Close'].iloc[-1]
+                    prev = d['Close'].iloc[-2]
+                    delta = val - prev
+                    delta_pct = (delta / prev) * 100
+                    risultati[nome] = {'valore': val, 'delta': delta, 'delta_pct': delta_pct}
+            except Exception as e:
+                st.warning(f"Dato macro non disponibile ({nome}): {e}")
+        return risultati
+
+    with st.spinner("Caricamento dati macro..."):
+        macro = get_macro_data()
+
+    if macro:
+        col_m1, col_m2, col_m3 = st.columns(3)
+
+        # VIX — Indice della paura
+        if 'VIX' in macro:
+            v = macro['VIX']
+            vix_val = v['valore']
+            # Regime VIX: <15 calmo, 15-25 normale, 25-35 stress, >35 panico
+            if vix_val < 15:
+                regime = "MERCATO CALMO"
+                shield_color = "#00d4aa"
+            elif vix_val < 25:
+                regime = "VOLATILITÀ NORMALE"
+                shield_color = "#c9a84c"
+            elif vix_val < 35:
+                regime = "STRESS DI MERCATO"
+                shield_color = "#e05a5a"
+            else:
+                regime = "PANICO — SHIELD CRITICO"
+                shield_color = "#ff2222"
+
+            col_m1.metric(
+                "VIX — INDICE DELLA PAURA",
+                f"{vix_val:.2f}",
+                f"{v['delta_pct']:+.2f}% — {regime}"
+            )
+            # Barra visiva del regime VIX
+            vix_pct = min(vix_val / 50, 1.0)
+            col_m1.markdown(f"""
+            <div style="margin-top:8px;">
+                <div style="display:flex; justify-content:space-between;
+                            font-size:10px; color:#7a8fa6; margin-bottom:4px;">
+                    <span>CALMO</span><span>STRESS</span><span>PANICO</span>
+                </div>
+                <div style="background:#1a2d45; border-radius:3px; height:6px; overflow:hidden;">
+                    <div style="width:{vix_pct*100:.0f}%; background:{shield_color};
+                                height:100%; border-radius:3px;"></div>
+                </div>
+                <div style="font-size:10px; color:{shield_color}; margin-top:4px;
+                            font-family:'Courier New',monospace; letter-spacing:0.08em;">
+                    {regime}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        # Treasury 10Y
+        if 'TREASURY_10Y' in macro:
+            t = macro['TREASURY_10Y']
+            col_m2.metric(
+                "TREASURY USA 10Y",
+                f"{t['valore']:.3f}%",
+                f"{t['delta_pct']:+.2f}%"
+            )
+            col_m2.markdown(f"""
+            <div style="margin-top:8px; font-size:11px; color:#7a8fa6;
+                        font-family:'Courier New',monospace; line-height:1.8;">
+                {"⚠ TASSI ALTI — pressione su growth" if t['valore'] > 4.5
+                 else "✓ TASSI MODERATI — contesto neutro" if t['valore'] > 3.5
+                 else "✓ TASSI BASSI — favorevole a tech/growth"}
+            </div>
+            """, unsafe_allow_html=True)
+
+        # DXY — Dollaro
+        if 'DXY' in macro:
+            d = macro['DXY']
+            col_m3.metric(
+                "DXY — INDICE DOLLARO",
+                f"{d['valore']:.2f}",
+                f"{d['delta_pct']:+.2f}%"
+            )
+            col_m3.markdown(f"""
+            <div style="margin-top:8px; font-size:11px; color:#7a8fa6;
+                        font-family:'Courier New',monospace; line-height:1.8;">
+                {"⚠ DOLLARO FORTE — pressione su commodities e mercati EM"
+                 if d['valore'] > 104
+                 else "✓ DOLLARO NEUTRO — contesto equilibrato"}
+            </div>
+            """, unsafe_allow_html=True)
+
+        # Stato Golden Shield contestualizzato con il VIX
+        st.markdown("---")
+        if 'VIX' in macro:
+            vix_val = macro['VIX']['valore']
+            peso_shield = df_aziende[df_aziende['Tier'] == 'Tier 3']['Peso_Effettivo'].sum() if not df_aziende.empty else 0
+            if vix_val > 25 and peso_shield >= 30:
+                st.success(f"GOLDEN SHIELD OPERATIVO in regime di stress (VIX {vix_val:.1f}). Tier 3 al {peso_shield:.1f}% — protezione attiva.")
+            elif vix_val > 25 and peso_shield < 30:
+                st.error(f"ATTENZIONE — VIX a {vix_val:.1f} (stress) ma Tier 3 solo al {peso_shield:.1f}%. Ribilanciare urgentemente.")
+            else:
+                st.info(f"Mercato nella norma (VIX {vix_val:.1f}). Tier 3 al {peso_shield:.1f}% — monitoraggio standard.")
+    else:
+        st.warning("Impossibile caricare dati macro. Controlla la connessione.")
+
+    st.markdown("---")
+
+    # ---- SEZIONE B: MATRICE DI CORRELAZIONE ----
+    st.markdown("### MATRICE DI CORRELAZIONE — DECORRELAZIONE TIER")
+    st.caption("Scarica 90 giorni di dati storici per tutte le aziende in portafoglio e calcola la correlazione dei rendimenti giornalieri.")
+
+    @st.cache_data(ttl=3600)  # Cache 1 ora — dati storici non cambiano frequentemente
+    def calcola_correlazione(tickers: tuple):
+        """Scarica 90gg di dati e calcola la matrice di correlazione dei rendimenti."""
+        try:
+            raw = yf.download(list(tickers), period="90d", auto_adjust=True, progress=False)
+            if raw.empty:
+                return None, None
+            # Gestisce sia singolo ticker che multipli
+            if isinstance(raw.columns, pd.MultiIndex):
+                prezzi = raw['Close']
+            else:
+                prezzi = raw[['Close']]
+            rendimenti = prezzi.pct_change().dropna()
+            return rendimenti.corr(), rendimenti
+        except Exception as e:
+            st.warning(f"Errore nel calcolo correlazione: {e}")
+            return None, None
+
+    if not df_aziende.empty and 'Ticker' in df_aziende.columns:
+        tickers_portafoglio = tuple(df_aziende['Ticker'].dropna().unique())
+
+        if len(tickers_portafoglio) >= 2:
+            with st.spinner(f"Scaricando 90 giorni di dati per {len(tickers_portafoglio)} aziende..."):
+                corr_matrix, rendimenti = calcola_correlazione(tickers_portafoglio)
+
+            if corr_matrix is not None and not corr_matrix.empty:
+
+                # Sostituisce i ticker con i nomi azienda se disponibili
+                ticker_to_nome = dict(zip(df_aziende['Ticker'], df_aziende['Azienda']))
+                corr_display = corr_matrix.copy()
+                corr_display.columns = [ticker_to_nome.get(t, t) for t in corr_display.columns]
+                corr_display.index = [ticker_to_nome.get(t, t) for t in corr_display.index]
+
+                # Heatmap con scala divergente: rosso=correlato, verde=decorrelato
+                fig_heatmap = go.Figure(go.Heatmap(
+                    z=corr_display.values,
+                    x=corr_display.columns.tolist(),
+                    y=corr_display.index.tolist(),
+                    colorscale=[
+                        [0.0,  '#00d4aa'],   # -1.0 = decorrelazione perfetta = verde
+                        [0.5,  '#0d1b2a'],   # 0.0  = nessuna correlazione = neutro
+                        [1.0,  '#e05a5a'],   # +1.0 = correlazione perfetta = rosso
+                    ],
+                    zmid=0,
+                    zmin=-1,
+                    zmax=1,
+                    text=np.round(corr_display.values, 2),
+                    texttemplate="%{text}",
+                    textfont=dict(size=10, color='#e8eaf0', family='Courier New'),
+                    hovertemplate='%{y} / %{x}<br>Correlazione: %{z:.3f}<extra></extra>',
+                    colorbar=dict(
+                        tickcolor='#7a8fa6',
+                        tickfont=dict(color='#7a8fa6', size=10),
+                        title=dict(text='ρ', font=dict(color='#7a8fa6')),
+                        bgcolor='#0d1b2a',
+                    )
+                ))
+                fig_heatmap.update_layout(
+                    paper_bgcolor='#0d1b2a',
+                    plot_bgcolor='#0d1b2a',
+                    font=dict(color='#e8eaf0', family='Courier New', size=10),
+                    xaxis=dict(tickangle=-35, tickfont=dict(size=9), gridcolor='#1a2d45'),
+                    yaxis=dict(tickfont=dict(size=9), gridcolor='#1a2d45'),
+                    margin=dict(t=20, b=80, l=120, r=20),
+                    height=max(400, len(tickers_portafoglio) * 38),
+                )
+                st.plotly_chart(fig_heatmap, use_container_width=True)
+
+                # Analisi automatica della decorrelazione del Tier 3
+                st.markdown("#### ANALISI AUTOMATICA DECORRELAZIONE TIER 3")
+                if 'Tier' in df_aziende.columns:
+                    ticker_t3 = df_aziende[df_aziende['Tier'] == 'Tier 3']['Ticker'].tolist()
+                    ticker_t1 = df_aziende[df_aziende['Tier'] == 'Tier 1']['Ticker'].tolist()
+
+                    if ticker_t3 and ticker_t1:
+                        coppie_cross = []
+                        for t3 in ticker_t3:
+                            for t1 in ticker_t1:
+                                if t3 in corr_matrix.columns and t1 in corr_matrix.columns:
+                                    rho = corr_matrix.loc[t3, t1]
+                                    nome_t3 = ticker_to_nome.get(t3, t3)
+                                    nome_t1 = ticker_to_nome.get(t1, t1)
+                                    coppie_cross.append((nome_t3, nome_t1, rho))
+
+                        if coppie_cross:
+                            media_cross = np.mean([c[2] for c in coppie_cross])
+                            if media_cross < 0.3:
+                                st.success(f"SHIELD CONFERMATO — Correlazione media Tier 3 / Tier 1: {media_cross:.2f}. Il Tier 3 è effettivamente decorrelato e funziona da scudo.")
+                            elif media_cross < 0.6:
+                                st.warning(f"DECORRELAZIONE PARZIALE — Correlazione media Tier 3 / Tier 1: {media_cross:.2f}. Verificare la composizione del Tier 3.")
+                            else:
+                                st.error(f"SHIELD DEBOLE — Correlazione media Tier 3 / Tier 1: {media_cross:.2f}. Il Tier 3 si muove troppo in linea col Tier 1.")
+            else:
+                st.warning("Impossibile calcolare la matrice. I ticker nel CSV potrebbero non essere riconosciuti da Yahoo Finance.")
+        else:
+            st.info("Servono almeno 2 aziende nel portafoglio per calcolare la correlazione.")
+    else:
+        st.warning("Dati portafoglio non disponibili.")
+
+
+# --- SCHEDA 5: RISCHIO & ORDINI ---
 with tab_rischio:
     st.markdown("### GESTIONE RISCHIO & ORDINI")
     limite_rischio = st.slider("Soglia massima per posizione (%):", 5, 40, 15, step=1)
