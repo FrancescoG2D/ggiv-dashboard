@@ -1117,20 +1117,52 @@ with tab_correlazione:
     st.markdown("### MATRICE DI CORRELAZIONE — DECORRELAZIONE TIER")
     st.caption("Scarica 90 giorni di dati storici per tutte le aziende in portafoglio e calcola la correlazione dei rendimenti giornalieri.")
 
-    @st.cache_data(ttl=3600)  # Cache 1 ora — dati storici non cambiano frequentemente
+    @st.cache_data(ttl=3600)
     def calcola_correlazione(tickers: tuple):
         """Scarica 90gg di dati e calcola la matrice di correlazione dei rendimenti."""
         try:
-            raw = yf.download(list(tickers), period="90d", auto_adjust=True, progress=False)
-            if raw.empty:
+            raw = yf.download(
+                list(tickers), period="90d",
+                auto_adjust=True, progress=False,
+                group_by="ticker",
+            )
+            if raw is None or raw.empty:
                 return None, None
-            # Gestisce sia singolo ticker che multipli
+
+            # Estrae i prezzi Close gestendo tutte le strutture possibili di yfinance
             if isinstance(raw.columns, pd.MultiIndex):
-                prezzi = raw['Close']
+                # Struttura (Metric, Ticker) — es. ('Close', 'AAPL')
+                if 'Close' in raw.columns.get_level_values(0):
+                    prezzi = raw['Close']
+                # Struttura (Ticker, Metric) — es. ('AAPL', 'Close')
+                elif 'Close' in raw.columns.get_level_values(1):
+                    prezzi = raw.xs('Close', axis=1, level=1)
+                else:
+                    return None, None
             else:
-                prezzi = raw[['Close']]
-            rendimenti = prezzi.pct_change().dropna()
+                # Singolo ticker — colonna piatta
+                if 'Close' in raw.columns:
+                    prezzi = raw[['Close']]
+                    prezzi.columns = list(tickers)[:1]
+                else:
+                    return None, None
+
+            # Rimuovi colonne completamente vuote (ticker non trovati)
+            prezzi = prezzi.dropna(axis=1, how='all')
+
+            if prezzi.shape[1] < 2:
+                return None, None
+
+            rendimenti = prezzi.pct_change().dropna(how='all')
+
+            # Rimuovi righe con troppi NaN
+            rendimenti = rendimenti.dropna(thresh=int(rendimenti.shape[1] * 0.5))
+
+            if rendimenti.shape[0] < 10:
+                return None, None
+
             return rendimenti.corr(), rendimenti
+
         except Exception as e:
             st.warning(f"Errore nel calcolo correlazione: {e}")
             return None, None
