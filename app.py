@@ -499,6 +499,291 @@ with tab_backtest:
     col_c2.metric("IMPATTO TIER 3", f"{-crollo * 0.2:.1f}%", "protezione shield")
     col_c3.metric("IMPATTO NETTO", f"€ {capitale_globale * (impatto_tot / 100):,.0f}", f"{impatto_tot:.1f}%")
 
+    st.markdown("---")
+    st.markdown("### TEAR SHEET — BACKTEST ISTITUZIONALE (2020 → OGGI)")
+    st.caption("Scarica prezzi storici reali, applica la metodologia DSRM/Tier del Rulebook v1.3 e genera un PDF pronto per la presentazione.")
+
+    if st.button("GENERA TEAR SHEET PDF"):
+        if df_aziende.empty:
+            st.error("Dati portafoglio non disponibili. Controlla la connessione al CSV.")
+        else:
+            with st.spinner("Scaricando dati storici e calcolando metriche... (1-2 minuti)"):
+                try:
+                    import matplotlib
+                    matplotlib.use('Agg')
+                    import matplotlib.pyplot as plt
+                    import matplotlib.patches as mpatches
+                    import io as _io
+                    from reportlab.lib.pagesizes import A4
+                    from reportlab.lib.styles import ParagraphStyle
+                    from reportlab.lib.units import cm
+                    from reportlab.lib import colors as rl_colors
+                    from reportlab.platypus import (
+                        SimpleDocTemplate, Paragraph, Spacer, Table,
+                        TableStyle, HRFlowable, Image, PageBreak
+                    )
+                    from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
+
+                    DATA_INIZIO = "2020-01-01"
+                    BASE_VAL    = 1000.0
+                    BENCH_T     = "^GSPC"
+                    BENCH_N     = "S&P 500"
+                    T_MULT      = {"Tier 1": 1.5, "Tier 2": 1.0, "Tier 3": 0.5}
+                    CS          = "#0a0e1a"
+                    CB          = "#0d1b2a"
+                    CV          = "#00d4aa"
+                    CR          = "#e05a5a"
+                    CO          = "#c9a84c"
+                    CG          = "#7a8fa6"
+
+                    # Pesi con DSRM + UCITS
+                    df_bt = df_aziende.copy()
+                    df_bt['Mult'] = df_bt['Tier'].map(T_MULT).fillna(1.0)
+                    df_bt['FDSRM'] = df_bt['Giorni_Silenzio'].apply(
+                        lambda g: 0.0 if g > 90 else 0.75 if g > 45 else 1.0
+                    ) if 'Giorni_Silenzio' in df_bt.columns else 1.0
+                    df_bt['PG'] = df_bt['Peso_Base'] * df_bt['FDSRM'] * df_bt['Mult']
+                    tot = df_bt['PG'].sum()
+                    df_bt['PN'] = ((df_bt['PG'] / tot * 100).clip(upper=10.0) if tot > 0 else 0)
+                    df_bt['PN'] = df_bt['PN'] / df_bt['PN'].sum() * 100
+
+                    # Download prezzi
+                    tickers_bt = df_bt['Ticker'].dropna().unique().tolist()
+                    raw_bt = yf.download(tickers_bt + [BENCH_T], start=DATA_INIZIO,
+                                         auto_adjust=True, progress=False)
+                    prezzi_bt = raw_bt['Close'] if isinstance(raw_bt.columns, pd.MultiIndex) else raw_bt
+                    prezzi_bt = prezzi_bt.dropna(axis=1, how='all')
+                    tickers_ok = [t for t in tickers_bt if t in prezzi_bt.columns]
+                    df_bt = df_bt[df_bt['Ticker'].isin(tickers_ok)].copy()
+                    df_bt['PN'] = df_bt['PN'] / df_bt['PN'].sum() * 100
+
+                    # Serie GGIV
+                    rend_bt = prezzi_bt.pct_change().dropna()
+                    pesi_v  = np.array([df_bt.set_index('Ticker').loc[t, 'PN'] / 100
+                                        for t in tickers_ok])
+                    rend_g  = pd.Series(rend_bt[tickers_ok].values @ pesi_v,
+                                        index=rend_bt.index)
+                    idx_g   = (1 + rend_g).cumprod() * BASE_VAL
+                    rend_b  = (prezzi_bt[BENCH_T].pct_change().dropna()
+                               .reindex(rend_g.index).fillna(0)
+                               if BENCH_T in prezzi_bt.columns
+                               else pd.Series(0, index=rend_g.index))
+                    idx_b   = (1 + rend_b).cumprod() * BASE_VAL
+
+                    # Metriche
+                    def calc_m(rend, idx, nome):
+                        ny  = len(rend) / 252
+                        cagr = (idx.iloc[-1] / BASE_VAL) ** (1/ny) - 1
+                        vol  = rend.std() * np.sqrt(252)
+                        rf   = 0.035
+                        sh   = (cagr - rf) / vol if vol > 0 else 0
+                        dd   = ((idx - idx.cummax()) / idx.cummax()).min()
+                        cal  = cagr / abs(dd) if dd != 0 else 0
+                        dv   = rend[rend < 0].std() * np.sqrt(252)
+                        so   = (cagr - rf) / dv if dv > 0 else 0
+                        rm   = rend.resample('ME').apply(lambda x: (1+x).prod()-1)
+                        ra   = rend.resample('YE').apply(lambda x: (1+x).prod()-1)
+                        return {
+                            'nome': nome, 'cagr': cagr, 'vol': vol, 'sh': sh,
+                            'so': so, 'dd': dd, 'cal': cal,
+                            'rt': idx.iloc[-1]/BASE_VAL - 1,
+                            'wr': (rend > 0).mean(),
+                            'bm': rm.max(), 'wm': rm.min(),
+                            'bmd': rm.idxmax().strftime('%b %Y') if not rm.empty else '',
+                            'wmd': rm.idxmin().strftime('%b %Y') if not rm.empty else '',
+                            'ra': ra,
+                            'dds': (idx - idx.cummax()) / idx.cummax(),
+                        }
+
+                    mg = calc_m(rend_g, idx_g, "GGIV Index")
+                    mb = calc_m(rend_b, idx_b, BENCH_N)
+
+                    # Stile grafici
+                    plt.rcParams.update({
+                        'figure.facecolor': CS, 'axes.facecolor': CB,
+                        'axes.edgecolor': '#1a2d45', 'axes.labelcolor': CG,
+                        'axes.grid': True, 'grid.color': '#1a2d45',
+                        'grid.linewidth': 0.5, 'xtick.color': CG,
+                        'ytick.color': CG, 'text.color': '#e8eaf0',
+                        'font.family': 'monospace', 'font.size': 9,
+                    })
+
+                    # Grafico 1 — Performance
+                    fig1, axes = plt.subplots(3, 1, figsize=(12, 10),
+                                              gridspec_kw={'height_ratios': [3, 1.2, 1.2]})
+                    fig1.patch.set_facecolor(CS)
+                    ax1 = axes[0]
+                    ax1.plot(idx_b.index, idx_b.values, color=CG, lw=1.2, label=BENCH_N, alpha=0.8)
+                    ax1.plot(idx_g.index, idx_g.values, color=CV, lw=2.0, label='GGIV Index')
+                    ax1.fill_between(idx_g.index, BASE_VAL, idx_g.values,
+                                     where=idx_g.values > BASE_VAL, color=CV, alpha=0.07)
+                    ax1.axhline(BASE_VAL, color='#1a2d45', lw=0.8, ls='--')
+                    crash = pd.Timestamp('2020-03-23')
+                    if crash in idx_g.index:
+                        ax1.axvline(crash, color=CR, lw=0.8, ls=':', alpha=0.6)
+                        ax1.text(crash, ax1.get_ylim()[0]*1.02, 'COVID\nLow',
+                                 color=CR, fontsize=7, ha='center')
+                    ax1.legend(loc='upper left', framealpha=0.3, facecolor=CB, edgecolor='#1a2d45')
+                    ax1.set_title(f'GGIV Index vs {BENCH_N} — 2020 → {datetime.now().year}',
+                                  color='#e8eaf0', fontsize=11, pad=10)
+                    ax1.set_ylabel('Valore (base 1000)')
+
+                    ax2 = axes[1]
+                    ra_g = mg['ra'] * 100
+                    ra_b = mb['ra'].reindex(mg['ra'].index, fill_value=0) * 100
+                    x    = np.arange(len(ra_g))
+                    w    = 0.35
+                    ax2.bar(x-w/2, ra_g.values, w,
+                            color=[CV if v >= 0 else CR for v in ra_g.values],
+                            alpha=0.85, label='GGIV')
+                    ax2.bar(x+w/2, ra_b.values, w, color=CG, alpha=0.6, label=BENCH_N)
+                    ax2.set_xticks(x); ax2.set_xticklabels(ra_g.index.year, fontsize=8)
+                    ax2.axhline(0, color='#1a2d45', lw=0.8)
+                    ax2.set_ylabel('Rend. Annuo (%)')
+                    ax2.legend(fontsize=8, facecolor=CB, edgecolor='#1a2d45', framealpha=0.4)
+
+                    ax3 = axes[2]
+                    dds = mg['dds'] * 100
+                    ax3.fill_between(dds.index, 0, dds.values, color=CR, alpha=0.5)
+                    ax3.plot(dds.index, dds.values, color=CR, lw=0.8)
+                    ax3.axhline(0, color='#1a2d45', lw=0.5)
+                    ax3.set_ylabel('Drawdown (%)'); ax3.set_xlabel('Data')
+                    mi = dds.idxmin()
+                    ax3.annotate(f'Max DD: {dds.min():.1f}%',
+                                 xy=(mi, dds.min()), xytext=(mi, dds.min()-3),
+                                 color=CR, fontsize=8, ha='center',
+                                 arrowprops=dict(arrowstyle='->', color=CR, lw=0.8))
+                    plt.tight_layout(pad=1.5)
+                    b1 = _io.BytesIO()
+                    plt.savefig(b1, format='png', dpi=150, bbox_inches='tight', facecolor=CS)
+                    plt.close(); b1.seek(0)
+
+                    # Grafico 2 — Composizione
+                    fig2, (axA, axB) = plt.subplots(1, 2, figsize=(10, 4))
+                    fig2.patch.set_facecolor(CS)
+                    ct = {'Tier 1': CR, 'Tier 2': '#378ADD', 'Tier 3': CV}
+                    pt = df_bt.groupby('Tier')['PN'].sum()
+                    wedges, texts, autotexts = axA.pie(
+                        pt.values, labels=pt.index, autopct='%1.1f%%',
+                        colors=[ct.get(t, CG) for t in pt.index],
+                        pctdistance=0.75, startangle=90,
+                        wedgeprops=dict(linewidth=1.5, edgecolor=CS)
+                    )
+                    for t in texts: t.set_color('#e8eaf0'); t.set_fontsize(9)
+                    for at in autotexts: at.set_color('#0a0e1a'); at.set_fontsize(8)
+                    axA.set_title('Allocazione per Tier', color='#e8eaf0', fontsize=10)
+                    df_s = df_bt.sort_values('PN', ascending=True)
+                    nomi = [str(a)[:20] for a in df_s['Azienda']]
+                    brs  = axB.barh(nomi, df_s['PN'].values,
+                                    color=[ct.get(t, CG) for t in df_s['Tier']],
+                                    alpha=0.85, height=0.6)
+                    axB.axvline(10, color=CO, lw=0.8, ls='--', alpha=0.7)
+                    for bar, val in zip(brs, df_s['PN'].values):
+                        axB.text(val+0.2, bar.get_y()+bar.get_height()/2,
+                                 f'{val:.1f}%', va='center', color='#e8eaf0', fontsize=7.5)
+                    axB.set_xlabel('Peso (%)')
+                    axB.set_title('Pesi per Azienda (post DSRM+UCITS)', color='#e8eaf0', fontsize=10)
+                    axB.legend(handles=[mpatches.Patch(color=c, label=t) for t, c in ct.items()],
+                               fontsize=8, facecolor=CB, edgecolor='#1a2d45', framealpha=0.5)
+                    plt.tight_layout(pad=1.5)
+                    b2 = _io.BytesIO()
+                    plt.savefig(b2, format='png', dpi=150, bbox_inches='tight', facecolor=CS)
+                    plt.close(); b2.seek(0)
+
+                    # PDF
+                    pdf_buf = _io.BytesIO()
+                    NR = rl_colors.HexColor('#0a0e1a')
+                    BR = rl_colors.HexColor('#0d1b2a')
+                    OR = rl_colors.HexColor('#c9a84c')
+                    VR = rl_colors.HexColor('#1D9E75')
+                    RR = rl_colors.HexColor('#A32D2D')
+                    GR = rl_colors.HexColor('#4a4a5a')
+                    WR = rl_colors.white
+
+                    def PS(n, **k): return ParagraphStyle(n, **k)
+                    HS  = PS('H',  fontName='Helvetica-Bold', fontSize=20, textColor=OR, leading=26, alignment=TA_CENTER)
+                    SS  = PS('S',  fontName='Helvetica', fontSize=10, textColor=rl_colors.HexColor('#e8eaf0'), leading=14, alignment=TA_CENTER)
+                    MS  = PS('M',  fontName='Helvetica', fontSize=8, textColor=GR, leading=12, alignment=TA_CENTER)
+                    SeS = PS('Se', fontName='Helvetica-Bold', fontSize=11, textColor=NR, leading=14, spaceBefore=8, spaceAfter=3)
+                    NS  = PS('N',  fontName='Helvetica-Bold', fontSize=17, textColor=OR, leading=21, alignment=TA_CENTER)
+                    LS  = PS('L',  fontName='Helvetica', fontSize=8, textColor=GR, leading=11, alignment=TA_CENTER)
+                    THS = PS('TH', fontName='Helvetica-Bold', fontSize=8, textColor=WR, leading=11, alignment=TA_CENTER)
+                    TCS = PS('TC', fontName='Helvetica', fontSize=8, textColor=NR, leading=11)
+                    TCC = PS('TCC',fontName='Helvetica', fontSize=8, textColor=NR, leading=11, alignment=TA_CENTER)
+                    TGS = PS('TG', fontName='Helvetica-Bold', fontSize=8, textColor=VR, leading=11, alignment=TA_CENTER)
+                    TRS = PS('TR', fontName='Helvetica-Bold', fontSize=8, textColor=RR, leading=11, alignment=TA_CENTER)
+                    DS  = PS('D',  fontName='Helvetica-Oblique', fontSize=7.5, textColor=GR, leading=11, alignment=TA_JUSTIFY)
+
+                    def hrr(): return HRFlowable(width='100%', thickness=1.0, color=OR, spaceAfter=8, spaceBefore=4)
+                    def spr(h=6): return Spacer(1, h)
+                    def cd(v, pos=True): return TGS if (v > 0) == pos else TRS
+
+                    doc_pdf = SimpleDocTemplate(pdf_buf, pagesize=A4,
+                        leftMargin=2.2*cm, rightMargin=2.2*cm,
+                        topMargin=2.0*cm, bottomMargin=2.0*cm,
+                        title='GGIV Index — Backtest Tear Sheet',
+                        author='Francesco Giliberti')
+
+                    sp_pdf = []
+                    sp_pdf += [
+                        Paragraph("⬡ GGIV INDEX", HS),
+                        Paragraph("GRAPHENE GLOBAL INDEX VAULT — BACKTEST TEAR SHEET", SS),
+                        Paragraph(f"Periodo: {DATA_INIZIO} → {datetime.now().strftime('%d/%m/%Y')}  |  Benchmark: {BENCH_N}  |  Base: {BASE_VAL:.0f}  |  AUM simulato: € {capitale_globale:,.0f}", MS),
+                        hrr(), spr(4),
+                    ]
+                    kpi = [[Paragraph(f"{mg['cagr']*100:.2f}%", NS), Paragraph(f"{mg['sh']:.2f}", NS), Paragraph(f"{mg['dd']*100:.2f}%", NS), Paragraph(f"{mg['rt']*100:.1f}%", NS), Paragraph(f"{idx_g.iloc[-1]:,.1f}", NS)],
+                           [Paragraph("CAGR", LS), Paragraph("Sharpe Ratio", LS), Paragraph("Max Drawdown", LS), Paragraph("Rendimento Totale", LS), Paragraph(f"Valore Indice (base {BASE_VAL:.0f})", LS)]]
+                    kpi_t = Table(kpi, colWidths=[3.3*cm]*5)
+                    kpi_t.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1),BR),('BOX',(0,0),(-1,-1),0.5,OR),('INNERGRID',(0,0),(-1,-1),0.3,rl_colors.HexColor('#1a2d45')),('TOPPADDING',(0,0),(-1,-1),8),('BOTTOMPADDING',(0,0),(-1,-1),8),('VALIGN',(0,0),(-1,-1),'MIDDLE')]))
+                    sp_pdf += [kpi_t, spr(10), Paragraph("PERFORMANCE STORICA E DRAWDOWN", SeS), hrr(), Image(b1, width=16*cm, height=13.5*cm), spr(4), PageBreak()]
+
+                    def p(v): return f"{v*100:+.2f}%"
+                    def pp(v): return f"{v*100:.2f}%"
+                    def f2(v): return f"{v:.2f}"
+                    md = [
+                        [Paragraph("METRICA",THS), Paragraph("GGIV INDEX",THS), Paragraph(BENCH_N,THS), Paragraph("DELTA",THS)],
+                        [Paragraph("Rendimento Totale",TCS), Paragraph(p(mg['rt']),cd(mg['rt'])), Paragraph(p(mb['rt']),cd(mb['rt'])), Paragraph(p(mg['rt']-mb['rt']),cd(mg['rt']-mb['rt']))],
+                        [Paragraph("CAGR Annualizzato",TCS), Paragraph(p(mg['cagr']),cd(mg['cagr'])), Paragraph(p(mb['cagr']),cd(mb['cagr'])), Paragraph(p(mg['cagr']-mb['cagr']),cd(mg['cagr']-mb['cagr']))],
+                        [Paragraph("Volatilità Annualizzata",TCS), Paragraph(pp(mg['vol']),TCC), Paragraph(pp(mb['vol']),TCC), Paragraph("—",TCC)],
+                        [Paragraph("Sharpe Ratio (rf=3.5%)",TCS), Paragraph(f2(mg['sh']),cd(mg['sh'])), Paragraph(f2(mb['sh']),cd(mb['sh'])), Paragraph(f2(mg['sh']-mb['sh']),cd(mg['sh']-mb['sh']))],
+                        [Paragraph("Sortino Ratio",TCS), Paragraph(f2(mg['so']),cd(mg['so'])), Paragraph(f2(mb['so']),cd(mb['so'])), Paragraph(f2(mg['so']-mb['so']),cd(mg['so']-mb['so']))],
+                        [Paragraph("Maximum Drawdown",TCS), Paragraph(p(mg['dd']),cd(mg['dd'],False)), Paragraph(p(mb['dd']),cd(mb['dd'],False)), Paragraph(p(mg['dd']-mb['dd']),cd(mg['dd']-mb['dd'],False))],
+                        [Paragraph("Calmar Ratio",TCS), Paragraph(f2(mg['cal']),cd(mg['cal'])), Paragraph(f2(mb['cal']),cd(mb['cal'])), Paragraph(f2(mg['cal']-mb['cal']),cd(mg['cal']-mb['cal']))],
+                        [Paragraph("Win Rate",TCS), Paragraph(f"{mg['wr']*100:.1f}%",TCC), Paragraph(f"{mb['wr']*100:.1f}%",TCC), Paragraph("—",TCC)],
+                        [Paragraph("Miglior Mese",TCS), Paragraph(f"{mg['bm']*100:+.1f}% ({mg['bmd']})",TGS), Paragraph(f"{mb['bm']*100:+.1f}% ({mb['bmd']})",TGS), Paragraph("—",TCC)],
+                        [Paragraph("Peggior Mese",TCS), Paragraph(f"{mg['wm']*100:+.1f}% ({mg['wmd']})",TRS), Paragraph(f"{mb['wm']*100:+.1f}% ({mb['wmd']})",TRS), Paragraph("—",TCC)],
+                    ]
+                    mt = Table(md, colWidths=[5.5*cm, 3.5*cm, 3.5*cm, 3.1*cm])
+                    mt.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),BR),('ROWBACKGROUNDS',(0,1),(-1,-1),[rl_colors.HexColor('#f9f9f7'),rl_colors.HexColor('#f5f5f5')]),('BOX',(0,0),(-1,-1),0.5,GR),('INNERGRID',(0,0),(-1,-1),0.3,rl_colors.HexColor('#cccccc')),('VALIGN',(0,0),(-1,-1),'MIDDLE'),('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),5),('LEFTPADDING',(0,0),(-1,-1),7),('RIGHTPADDING',(0,0),(-1,-1),7)]))
+                    sp_pdf += [Paragraph(f"METRICHE COMPARATIVE — GGIV vs {BENCH_N}", SeS), hrr(), mt, spr(10)]
+                    sp_pdf += [Paragraph("COMPOSIZIONE PORTAFOGLIO — POST DSRM + UCITS", SeS), hrr(), Image(b2, width=16*cm, height=6.5*cm), spr(6)]
+
+                    pd_data = [[Paragraph("TICKER",THS), Paragraph("AZIENDA",THS), Paragraph("TIER",THS), Paragraph("DSRM",THS), Paragraph("PESO BASE",THS), Paragraph("PESO FINALE",THS)]]
+                    for _, row in df_bt.sort_values('PN', ascending=False).iterrows():
+                        ds = TGS if row['FDSRM']==1.0 else (TCC if row['FDSRM']==0.75 else TRS)
+                        pd_data.append([Paragraph(str(row['Ticker']),TCC), Paragraph(str(row['Azienda'])[:26],TCS), Paragraph(str(row['Tier']),TCC), Paragraph(f"{row['FDSRM']:.2f}",ds), Paragraph(f"{row['Peso_Base']:.1f}%",TCC), Paragraph(f"{row['PN']:.2f}%",TCC)])
+                    pt2 = Table(pd_data, colWidths=[2.3*cm, 5.5*cm, 2.5*cm, 1.8*cm, 2.1*cm, 2.4*cm])
+                    pt2.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),BR),('ROWBACKGROUNDS',(0,1),(-1,-1),[rl_colors.HexColor('#f9f9f7'),rl_colors.HexColor('#f5f5f5')]),('BOX',(0,0),(-1,-1),0.5,GR),('INNERGRID',(0,0),(-1,-1),0.3,rl_colors.HexColor('#cccccc')),('VALIGN',(0,0),(-1,-1),'MIDDLE'),('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),5),('LEFTPADDING',(0,0),(-1,-1),6),('RIGHTPADDING',(0,0),(-1,-1),6)]))
+                    sp_pdf += [pt2, spr(12), hrr()]
+                    sp_pdf.append(Paragraph(f"DISCLAIMER — Documento generato automaticamente dal Vault Algorithm GGIV. I risultati del backtest sono calcolati ex-post su dati Yahoo Finance e non costituiscono garanzia di rendimenti futuri. Proprietà intellettuale di Francesco Giliberti — Rulebook v1.3 — {datetime.now().strftime('%d/%m/%Y')}.", DS))
+
+                    doc_pdf.build(sp_pdf)
+                    pdf_buf.seek(0)
+
+                    st.success("PDF generato con successo.")
+                    st.download_button(
+                        label="SCARICA TEAR SHEET PDF",
+                        data=pdf_buf,
+                        file_name=f"GGIV_TearSheet_{datetime.now().strftime('%Y%m%d')}.pdf",
+                        mime="application/pdf",
+                        use_container_width=True,
+                    )
+
+                except Exception as e:
+                    st.error(f"Errore nella generazione del PDF: {e}")
+                    import traceback
+                    st.code(traceback.format_exc())
+
 # --- SCHEDA 4: CORRELAZIONE & MACRO ---
 with tab_correlazione:
 
