@@ -1176,6 +1176,19 @@ with tab_correlazione:
 
             if corr_matrix is not None and not corr_matrix.empty:
 
+                # Rimuovi righe/colonne con tutti NaN (ticker senza dati storici)
+                corr_clean = corr_matrix.dropna(how='all', axis=0).dropna(how='all', axis=1)
+
+                # Ticker esclusi per dati insufficienti
+                esclusi = [t for t in corr_matrix.columns if t not in corr_clean.columns]
+                if esclusi:
+                    ticker_to_nome_warn = dict(zip(df_aziende['Ticker'], df_aziende['Azienda']))
+                    nomi_esclusi = [ticker_to_nome_warn.get(t, t) for t in esclusi]
+                    st.warning(f"Dati storici insufficienti per: {', '.join(nomi_esclusi)}. "
+                               f"Esclusi dalla matrice. Possibile causa: ticker OTC/illiquidi o quotazione recente.")
+
+                corr_matrix = corr_clean
+
                 # Sostituisce i ticker con i nomi azienda se disponibili
                 ticker_to_nome = dict(zip(df_aziende['Ticker'], df_aziende['Azienda']))
                 corr_display = corr_matrix.copy()
