@@ -278,26 +278,50 @@ if not df_aziende.empty and 'Giorni_Silenzio' in df_aziende.columns:
 # ==========================================
 # 6. TICKER HEADER
 # ==========================================
-@st.cache_data(ttl=300)
-def get_index_data(ticker):
-    try:
-        data = yf.Ticker(ticker).history(period="2d")
-        if len(data) >= 2:
-            close_oggi = data['Close'].iloc[-1]
-            close_ieri = data['Close'].iloc[-2]
-            change_pct = ((close_oggi - close_ieri) / close_ieri) * 100
-            return {'price': close_oggi, 'change_pct': change_pct}
-        return None
-    except Exception as e:
-        st.warning(f"Dati non disponibili per {ticker}: {e}")
-        return None
+# FIX rate limit: download batch unico + retry con backoff
+@st.cache_data(ttl=600)
+def get_tutti_indici():
+    import time
+    indici_map = {
+        'S&P 500': '^GSPC',
+        'NASDAQ':  '^IXIC',
+        'GOLD':    'GC=F',
+        'OIL':     'CL=F',
+        'VIX':     '^VIX',
+    }
+    risultati = {}
+    tickers_list = list(indici_map.values())
+    for tentativo in range(3):
+        try:
+            raw = yf.download(
+                tickers_list, period="5d",
+                auto_adjust=True, progress=False,
+                group_by='ticker',
+            )
+            if raw.empty:
+                time.sleep(2)
+                continue
+            for nome, ticker in indici_map.items():
+                try:
+                    close = (raw[ticker]['Close'].dropna()
+                             if isinstance(raw.columns, pd.MultiIndex)
+                             else raw['Close'].dropna())
+                    if len(close) >= 2:
+                        oggi = close.iloc[-1]
+                        ieri = close.iloc[-2]
+                        risultati[nome] = {
+                            'price': oggi,
+                            'change_pct': ((oggi - ieri) / ieri) * 100
+                        }
+                except Exception:
+                    pass
+            break
+        except Exception:
+            if tentativo < 2:
+                time.sleep(3 * (tentativo + 1))
+    return risultati
 
-indici = {'S&P 500': '^GSPC', 'NASDAQ': '^IXIC', 'GOLD': 'GC=F', 'OIL': 'CL=F', 'VIX': '^VIX'}
-dati_indici = {}
-for name, ticker in indici.items():
-    d = get_index_data(ticker)
-    if d:
-        dati_indici[name] = d
+dati_indici = get_tutti_indici()
 
 def render_ticker_item(name, d):
     cls = "t-up" if d['change_pct'] >= 0 else "t-down"
