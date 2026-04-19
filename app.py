@@ -1202,13 +1202,17 @@ with tab_correlazione:
                                     coppie_cross.append((nome_t3, nome_t1, rho))
 
                         if coppie_cross:
-                            media_cross = np.mean([c[2] for c in coppie_cross])
-                            if media_cross < 0.3:
-                                st.success(f"SHIELD CONFERMATO — Correlazione media Tier 3 / Tier 1: {media_cross:.2f}. Il Tier 3 è effettivamente decorrelato e funziona da scudo.")
-                            elif media_cross < 0.6:
-                                st.warning(f"DECORRELAZIONE PARZIALE — Correlazione media Tier 3 / Tier 1: {media_cross:.2f}. Verificare la composizione del Tier 3.")
+                            valori_cross = [c[2] for c in coppie_cross if not np.isnan(c[2])]
+                            if not valori_cross:
+                                st.info("DATI INSUFFICIENTI — Impossibile calcolare la correlazione. Servono almeno 30 giorni di dati storici comuni tra Tier 1 e Tier 3.")
                             else:
-                                st.error(f"SHIELD DEBOLE — Correlazione media Tier 3 / Tier 1: {media_cross:.2f}. Il Tier 3 si muove troppo in linea col Tier 1.")
+                                media_cross = np.mean(valori_cross)
+                                if media_cross < 0.3:
+                                    st.success(f"SHIELD CONFERMATO — Correlazione media Tier 3 / Tier 1: {media_cross:.2f}. Il Tier 3 è effettivamente decorrelato e funziona da scudo.")
+                                elif media_cross < 0.6:
+                                    st.warning(f"DECORRELAZIONE PARZIALE — Correlazione media Tier 3 / Tier 1: {media_cross:.2f}. Verificare la composizione del Tier 3.")
+                                else:
+                                    st.error(f"SHIELD DEBOLE — Correlazione media Tier 3 / Tier 1: {media_cross:.2f}. Il Tier 3 si muove troppo in linea col Tier 1.")
             else:
                 st.warning("Impossibile calcolare la matrice. I ticker nel CSV potrebbero non essere riconosciuti da Yahoo Finance.")
         else:
@@ -1293,9 +1297,19 @@ with tab_brevetti:
         # Mostra dettaglio brevetti se disponibile
         cb1, cb2, cb3 = st.columns(3)
         if 'Brevetti_Granted' in row_t.columns:
-            cb1.metric("BREVETTI GRANTED", str(int(row_t['Brevetti_Granted'].values[0] or 0)), "USPTO concessi")
+            try:
+                val_g = row_t['Brevetti_Granted'].values[0]
+                val_g = int(float(val_g)) if val_g not in (None, '', 'nan') and str(val_g) != 'nan' else 0
+            except (ValueError, TypeError):
+                val_g = 0
+            cb1.metric("BREVETTI GRANTED", str(val_g), "USPTO concessi")
         if 'Brevetti_Pending' in row_t.columns:
-            cb2.metric("BREVETTI PENDING", str(int(row_t['Brevetti_Pending'].values[0] or 0)), "domande attive")
+            try:
+                val_p = row_t['Brevetti_Pending'].values[0]
+                val_p = int(float(val_p)) if val_p not in (None, '', 'nan') and str(val_p) != 'nan' else 0
+            except (ValueError, TypeError):
+                val_p = 0
+            cb2.metric("BREVETTI PENDING", str(val_p), "domande attive")
         if 'Tier' in row_t.columns:
             tier_az = row_t['Tier'].values[0]
             coeff   = {"Tier 1": "α=0.30 β=0.70", "Tier 2": "α=0.55 β=0.45", "Tier 3": "α=0.70 β=0.30"}
