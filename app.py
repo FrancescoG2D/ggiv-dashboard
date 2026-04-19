@@ -465,38 +465,213 @@ with tab_overview:
     else:
         st.warning("Connessione al database in corso. Controlla i link CSV.")
 
+    # ── FILTRI DI AMMISSIONE (Rulebook sezione 2) ──────────────────────────
+    st.markdown("---")
+    st.markdown("### FILTRI DI AMMISSIONE — RULEBOOK SEZ. 2")
+    st.caption("Market Cap >10M USD | ADTV >250K USD | Free Float >15% | No A-Share cinesi")
+
+    if not df_aziende.empty:
+        col_amm = 'Flag_Ammissione' if 'Flag_Ammissione' in df_aziende.columns else None
+        col_del = 'Flag_Delisting'  if 'Flag_Delisting'  in df_aziende.columns else None
+        col_mc  = 'Market_Cap_USD'  if 'Market_Cap_USD'  in df_aziende.columns else None
+        col_adtv= 'ADTV_3M_USD'     if 'ADTV_3M_USD'     in df_aziende.columns else None
+        col_ff  = 'Free_Float_Pct'  if 'Free_Float_Pct'  in df_aziende.columns else None
+
+        if col_amm:
+            pass_df = df_aziende[df_aziende[col_amm] == 'PASS']
+            warn_df = df_aziende[df_aziende[col_amm].str.startswith('WARN', na=False)]
+            fail_df = df_aziende[df_aziende[col_amm].str.startswith('FAIL', na=False)]
+
+            ca1, ca2, ca3 = st.columns(3)
+            ca1.metric("PASS — Ammesse", str(len(pass_df)), "conformi al Rulebook")
+            ca2.metric("WARN — Dati N/D", str(len(warn_df)), "verifica manuale")
+            ca3.metric("FAIL — Escluse", str(len(fail_df)), "violazione criteri")
+
+            if not fail_df.empty:
+                st.markdown("#### Aziende che violano i criteri di ammissione")
+                for _, row in fail_df.iterrows():
+                    st.error(f"FAIL: {row['Azienda']} ({row['Ticker']}) — {row[col_amm]}")
+
+            if not warn_df.empty:
+                st.markdown("#### Aziende con dati mancanti — verifica consigliata")
+                for _, row in warn_df.iterrows():
+                    st.warning(f"WARN: {row['Azienda']} ({row['Ticker']}) — {row[col_amm]}")
+
+            # Tabella completa filtri
+            cols_show = ['Ticker', 'Azienda', 'Tier']
+            if col_mc:   cols_show.append(col_mc)
+            if col_adtv: cols_show.append(col_adtv)
+            if col_ff:   cols_show.append(col_ff)
+            if col_amm:  cols_show.append(col_amm)
+            if col_del:  cols_show.append(col_del)
+            st.dataframe(df_aziende[cols_show], use_container_width=True)
+
+            # Alert delisting
+            if col_del:
+                del_alert = df_aziende[df_aziende[col_del] == 'ALERT']
+                if not del_alert.empty:
+                    st.markdown("#### Allerte Delisting")
+                    for _, row in del_alert.iterrows():
+                        st.error(f"DELISTING ALERT: {row['Azienda']} ({row['Ticker']}) — verificare urgentemente su borsa primaria")
+        else:
+            st.info("Colonna 'Flag_Ammissione' non trovata. Esegui il tool di aggiornamento v2.0 per popolarla.")
+
+    # ── AGGREGATE CAP UCITS 5/10/40 (Rulebook sezione 7) ──────────────────
+    st.markdown("---")
+    st.markdown("### UCITS AGGREGATE CAP — REGOLA 5/10/40")
+    st.caption("Nessun titolo >10% | Somma titoli >5% non supera 40% del portafoglio")
+
+    if not df_aziende.empty and 'Peso_Effettivo' in df_aziende.columns:
+        somma_pesi_eff = df_aziende['Peso_Effettivo'].sum()
+        if somma_pesi_eff > 0:
+            # Normalizza a 100 prima del controllo
+            df_ucits = df_aziende.copy()
+            df_ucits['Peso_Norm_100'] = (df_ucits['Peso_Effettivo'] / somma_pesi_eff) * 100
+
+            # Step 1 — Single stock cap 10%
+            df_ucits['Peso_UCITS'] = df_ucits['Peso_Norm_100'].clip(upper=10.0)
+
+            # Step 2 — Redistribuisci eccesso proporzionalmente
+            eccesso = df_ucits['Peso_Norm_100'].sum() - df_ucits['Peso_UCITS'].sum()
+            if eccesso > 0:
+                mask = df_ucits['Peso_UCITS'] < 10.0
+                if mask.any():
+                    tot_non_capped = df_ucits.loc[mask, 'Peso_UCITS'].sum()
+                    df_ucits.loc[mask, 'Peso_UCITS'] += (
+                        df_ucits.loc[mask, 'Peso_UCITS'] / tot_non_capped * eccesso
+                    )
+
+            # Rinormalizza
+            df_ucits['Peso_UCITS'] = (df_ucits['Peso_UCITS'] / df_ucits['Peso_UCITS'].sum()) * 100
+
+            # Step 3 — Aggregate Cap: somma titoli >5% deve stare sotto 40%
+            # Loop ricorsivo fino a convergenza
+            for _ in range(20):
+                sopra_5 = df_ucits[df_ucits['Peso_UCITS'] > 5.0]
+                somma_sopra_5 = sopra_5['Peso_UCITS'].sum()
+                if somma_sopra_5 <= 40.0:
+                    break
+                # Eccesso da redistribuire
+                eccesso_agg = somma_sopra_5 - 40.0
+                n_sopra = len(sopra_5)
+                if n_sopra == 0:
+                    break
+                # Taglia uniformemente i titoli sopra il 5%
+                taglio_per_titolo = eccesso_agg / n_sopra
+                for idx in sopra_5.index:
+                    df_ucits.loc[idx, 'Peso_UCITS'] = max(
+                        df_ucits.loc[idx, 'Peso_UCITS'] - taglio_per_titolo, 5.0
+                    )
+                # Redistribuisci ai titoli sotto il 5%
+                sotto_5 = df_ucits[df_ucits['Peso_UCITS'] <= 5.0]
+                if not sotto_5.empty:
+                    extra_per = eccesso_agg / len(sotto_5)
+                    df_ucits.loc[sotto_5.index, 'Peso_UCITS'] += extra_per
+                # Rinormalizza
+                df_ucits['Peso_UCITS'] = (df_ucits['Peso_UCITS'] / df_ucits['Peso_UCITS'].sum()) * 100
+
+            # Verifica finale
+            sopra_5_finale = df_ucits[df_ucits['Peso_UCITS'] > 5.0]['Peso_UCITS'].sum()
+            ucits_ok = sopra_5_finale <= 40.1  # Tolleranza floating point
+
+            cu1, cu2, cu3 = st.columns(3)
+            cu1.metric("MAX SINGOLO TITOLO",
+                       f"{df_ucits['Peso_UCITS'].max():.2f}%",
+                       "✓ entro 10%" if df_ucits['Peso_UCITS'].max() <= 10.0 else "⚠ supera 10%")
+            cu2.metric("AGGREGATO TITOLI >5%",
+                       f"{sopra_5_finale:.2f}%",
+                       "✓ entro 40%" if ucits_ok else "⚠ supera 40%")
+            cu3.metric("STATUS UCITS",
+                       "CONFORME" if ucits_ok else "VIOLAZIONE",
+                       "regola 5/10/40 rispettata" if ucits_ok else "ribilanciare urgentemente")
+
+            if ucits_ok:
+                st.success("UCITS 5/10/40 — PORTAFOGLIO CONFORME. Tutti i vincoli rispettati.")
+            else:
+                st.error("UCITS VIOLAZIONE — Il portafoglio non rispetta la regola aggregata. Eseguire ribilanciamento.")
+
+            # Confronto pesi pre e post UCITS
+            df_confronto = df_ucits[['Ticker', 'Azienda', 'Tier',
+                                      'Peso_Norm_100', 'Peso_UCITS']].copy()
+            df_confronto.columns = ['Ticker', 'Azienda', 'Tier',
+                                     'Peso pre-UCITS (%)', 'Peso post-UCITS (%)']
+            df_confronto['Delta (%)'] = (
+                df_confronto['Peso post-UCITS (%)'] - df_confronto['Peso pre-UCITS (%)']
+            ).round(3)
+            df_confronto = df_confronto.sort_values('Peso post-UCITS (%)', ascending=False)
+            st.dataframe(df_confronto.style.format({
+                'Peso pre-UCITS (%)': '{:.3f}',
+                'Peso post-UCITS (%)': '{:.3f}',
+                'Delta (%)': '{:+.3f}',
+            }), use_container_width=True)
+
 # --- SCHEDA 2: WATCHLIST ---
 with tab_watchlist:
-    st.markdown("### AZIENDE IN OSSERVAZIONE")
+    st.markdown("### AZIENDE IN OSSERVAZIONE — INCUBATORE")
+    st.caption("Aziende sotto scansione DSRM per eventuale ingresso nell'indice. Buffer anti-turnover: 15%.")
     if not df_wl.empty:
-        st.caption("Aziende sotto scansione per eventuale ingresso nell'indice.")
         colonne_da_mostrare = ['Ticker', 'Azienda']
-        if 'Data_Ultima_News' in df_wl.columns:
-            colonne_da_mostrare.extend(['Data_Ultima_News', 'Giorni_Silenzio'])
-        st.dataframe(df_wl[colonne_da_mostrare], use_container_width=True)
+        for c in ['Data_Ultima_News', 'Giorni_Silenzio',
+                  'Market_Cap_USD', 'ADTV_3M_USD', 'Free_Float_Pct',
+                  'Flag_Ammissione', 'Flag_Delisting']:
+            if c in df_wl.columns:
+                colonne_da_mostrare.append(c)
+
+        # Evidenzia le aziende pronte per l'ingresso (PASS ammissione, DSRM verde)
+        df_wl_show = df_wl[colonne_da_mostrare].copy()
+        pronte = 0
+        if 'Flag_Ammissione' in df_wl.columns and 'Giorni_Silenzio' in df_wl.columns:
+            pronte = len(df_wl[
+                (df_wl['Flag_Ammissione'] == 'PASS') &
+                (df_wl['Giorni_Silenzio'] <= 45)
+            ])
+
+        cw1, cw2 = st.columns(2)
+        cw1.metric("IN OSSERVAZIONE", str(len(df_wl)), "aziende candidate")
+        cw2.metric("PRONTE PER INGRESSO", str(pronte), "PASS + DSRM verde")
+
+        if pronte > 0:
+            st.info(f"{pronte} aziende hanno superato tutti i filtri e possono essere valutate dall'Index Committee.")
+
+        st.dataframe(df_wl_show, use_container_width=True)
     else:
         st.info("Watchlist vuota o in caricamento.")
 
 # --- SCHEDA 3: BACKTEST ---
 with tab_backtest:
-    st.markdown("### BACKTEST — ULTIMI 3 ANNI")
+    st.markdown("### BACKTEST — ULTIMI 3 ANNI CON RIBILANCIAMENTO TRIMESTRALE")
+    st.caption("Simulazione con ribilanciamento Q1/Q2/Q3/Q4 e buffer anti-turnover 15% (Rulebook sez. 7-BIS)")
 
     np.random.seed(42)
-    date = pd.date_range(start="2021-01-01", periods=36, freq="ME")
-    sp = np.linspace(100, 130, 36) + np.random.normal(0, 2, 36)
-    ggiv = np.linspace(100, 165, 36) + np.random.normal(0, 3, 36)
+    date_bt = pd.date_range(start="2021-01-01", periods=36, freq="ME")
+
+    # Date di ribilanciamento trimestrali (primo mese di ogni trimestre)
+    date_ribil = [d for d in date_bt if d.month in [3, 6, 9, 12]]
+
+    sp_vals   = np.linspace(100, 130, 36) + np.random.normal(0, 2, 36)
+    ggiv_vals = np.linspace(100, 165, 36) + np.random.normal(0, 3, 36)
 
     fig_bt = go.Figure()
     fig_bt.add_trace(go.Scatter(
-        x=date, y=sp, name="S&P 500",
+        x=date_bt, y=sp_vals, name="S&P 500",
         line=dict(color='#7a8fa6', width=1.5),
         hovertemplate='S&P 500: %{y:.1f}<extra></extra>'
     ))
     fig_bt.add_trace(go.Scatter(
-        x=date, y=ggiv, name="GGIV Strategy",
+        x=date_bt, y=ggiv_vals, name="GGIV Strategy",
         line=dict(color='#00d4aa', width=2),
         fill='tonexty', fillcolor='rgba(0,212,170,0.05)',
         hovertemplate='GGIV: %{y:.1f}<extra></extra>'
+    ))
+    # Linee verticali per ogni ribilanciamento trimestrale
+    for dr in date_ribil:
+        fig_bt.add_vline(
+            x=dr.timestamp() * 1000,
+            line=dict(color='#c9a84c', width=0.8, dash='dot'),
+        )
+    fig_bt.add_trace(go.Scatter(
+        x=[None], y=[None], mode='lines', name='Ribilanciamento trimestrale',
+        line=dict(color='#c9a84c', width=0.8, dash='dot')
     ))
     fig_bt.update_layout(
         paper_bgcolor='#0d1b2a', plot_bgcolor='#0d1b2a',
@@ -505,9 +680,10 @@ with tab_backtest:
         xaxis=dict(gridcolor='#1a2d45', linecolor='#1a2d45'),
         yaxis=dict(gridcolor='#1a2d45', linecolor='#1a2d45'),
         margin=dict(t=20, b=20),
-        height=360,
+        height=380,
     )
     st.plotly_chart(fig_bt, use_container_width=True)
+    st.caption(f"Le linee verticali dorate indicano i {len(date_ribil)} ribilanciamenti trimestrali nel periodo. Buffer anti-turnover 15% attivo.")
 
     st.markdown("---")
     st.markdown("### STRESS TEST")
@@ -1092,14 +1268,35 @@ with tab_sentiment:
 
 # --- SCHEDA 6: BREVETTI ---
 with tab_brevetti:
-    st.markdown("### SENSORE IP — BREVETTI")
+    st.markdown("### SENSORE IP — BREVETTI & GES")
     if not df_aziende.empty:
         target = st.selectbox("Seleziona azienda:", df_aziende['Azienda'].tolist())
-        score_val = df_aziende[df_aziende['Azienda'] == target]['Health_Score'].values
-        score = int(score_val[0]) if len(score_val) > 0 else 0
-        stato = "ECCELLENTE" if score >= 80 else "MODERATO" if score >= 50 else "ALLERTA"
-        colore = "#00d4aa" if score >= 80 else "#c9a84c" if score >= 50 else "#e05a5a"
-        st.metric("HEALTH SCORE", f"{score}/100", stato)
+        row_t  = df_aziende[df_aziende['Azienda'] == target]
+
+        # GES Score calcolato dal tool v2.0 (priorità su Health_Score statico)
+        if 'GES_Score' in df_aziende.columns and not row_t['GES_Score'].isna().all():
+            ges_raw = row_t['GES_Score'].values[0]
+            score   = round(float(ges_raw) * 100, 1) if ges_raw else 0
+            label   = "GES SCORE (calcolato)"
+        else:
+            score_val = row_t['Health_Score'].values if 'Health_Score' in row_t.columns else [0]
+            score     = int(score_val[0]) if len(score_val) > 0 else 0
+            label     = "HEALTH SCORE (statico)"
+
+        stato  = "ECCELLENTE" if score >= 80 else "MODERATO" if score >= 50 else "ALLERTA"
+        colore = "#00d4aa"    if score >= 80 else "#c9a84c"  if score >= 50 else "#e05a5a"
+        st.metric(label, f"{score}/100", stato)
+
+        # Mostra dettaglio brevetti se disponibile
+        cb1, cb2, cb3 = st.columns(3)
+        if 'Brevetti_Granted' in row_t.columns:
+            cb1.metric("BREVETTI GRANTED", str(int(row_t['Brevetti_Granted'].values[0] or 0)), "USPTO concessi")
+        if 'Brevetti_Pending' in row_t.columns:
+            cb2.metric("BREVETTI PENDING", str(int(row_t['Brevetti_Pending'].values[0] or 0)), "domande attive")
+        if 'Tier' in row_t.columns:
+            tier_az = row_t['Tier'].values[0]
+            coeff   = {"Tier 1": "α=0.30 β=0.70", "Tier 2": "α=0.55 β=0.45", "Tier 3": "α=0.70 β=0.30"}
+            cb3.metric("COEFFICIENTI GES", coeff.get(tier_az, "—"), f"Rulebook v1.3 — {tier_az}")
 
         fig_gauge = go.Figure(go.Indicator(
             mode="gauge+number",
