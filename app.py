@@ -827,8 +827,13 @@ with tab_backtest:
                         ax1.text(crash, ax1.get_ylim()[0]*1.02, 'COVID\nLow',
                                  color=CR, fontsize=7, ha='center')
                     ax1.legend(loc='upper left', framealpha=0.3, facecolor=CB, edgecolor='#1a2d45')
-                    ax1.set_title(f'GGIV Index vs {BENCH_N} — 2020 → {datetime.now().year}',
-                                  color='#e8eaf0', fontsize=11, pad=10)
+                    # La serie parte dalla data in cui tutti i ticker hanno dati disponibili
+                    data_inizio_reale = idx_g.index[0].strftime('%b %Y')
+                    ax1.set_title(
+                        f'GGIV Index vs {BENCH_N} — {data_inizio_reale} → {datetime.now().strftime("%b %Y")} '
+                        f'(dati disponibili per tutti i costituenti)',
+                        color='#e8eaf0', fontsize=10, pad=10
+                    )
                     ax1.set_ylabel('Valore (base 1000)')
 
                     ax2 = axes[1]
@@ -968,7 +973,20 @@ with tab_backtest:
                     pt2 = Table(pd_data, colWidths=[2.3*cm, 5.5*cm, 2.5*cm, 1.8*cm, 2.1*cm, 2.4*cm])
                     pt2.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),BR),('ROWBACKGROUNDS',(0,1),(-1,-1),[rl_colors.HexColor('#f9f9f7'),rl_colors.HexColor('#f5f5f5')]),('BOX',(0,0),(-1,-1),0.5,GR),('INNERGRID',(0,0),(-1,-1),0.3,rl_colors.HexColor('#cccccc')),('VALIGN',(0,0),(-1,-1),'MIDDLE'),('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),5),('LEFTPADDING',(0,0),(-1,-1),6),('RIGHTPADDING',(0,0),(-1,-1),6)]))
                     sp_pdf += [pt2, spr(12), hrr()]
-                    sp_pdf.append(Paragraph(f"DISCLAIMER — Documento generato automaticamente dal Vault Algorithm GGIV. I risultati del backtest sono calcolati ex-post su dati Yahoo Finance e non costituiscono garanzia di rendimenti futuri. Proprietà intellettuale di Francesco Giliberti — Rulebook v1.3 — {datetime.now().strftime('%d/%m/%Y')}.", DS))
+                    data_serie_inizio = idx_g.index[0].strftime('%d/%m/%Y')
+                    n_costi = len(tickers_ok)
+                    sp_pdf.append(Paragraph(
+                        f"NOTA METODOLOGICA — Il periodo visualizzato ({data_serie_inizio} → "
+                        f"{datetime.now().strftime('%d/%m/%Y')}) riflette la data di inizio comune "
+                        f"a tutti i {n_costi} costituenti con dati disponibili su Yahoo Finance. "
+                        f"Ticker illiquidi o di quotazione recente possono ridurre l'orizzonte storico. "
+                        f"Le metriche del presente Tear Sheet si riferiscono alla composizione reale "
+                        f"del portafoglio GGIV con pesi DSRM + UCITS aggiornati, e differiscono dalla "
+                        f"simulazione del White Paper v1.3 (portafoglio ipotetico 20 costituenti, "
+                        f"periodo 2020-2024). Entrambe le analisi sono backtest ex-post e non "
+                        f"costituiscono garanzia di rendimenti futuri. "
+                        f"Proprietà intellettuale Francesco Giliberti — Rulebook v1.3 — "
+                        f"{datetime.now().strftime('%d/%m/%Y')}.", DS))
 
                     doc_pdf.build(sp_pdf)
                     pdf_buf.seek(0)
