@@ -478,9 +478,12 @@ with tab_overview:
         col_ff  = 'Free_Float_Pct'  if 'Free_Float_Pct'  in df_aziende.columns else None
 
         if col_amm:
-            pass_df = df_aziende[df_aziende[col_amm] == 'PASS']
-            warn_df = df_aziende[df_aziende[col_amm].str.startswith('WARN', na=False)]
-            fail_df = df_aziende[df_aziende[col_amm].str.startswith('FAIL', na=False)]
+            # FIX: forza conversione a stringa prima di .str — evita AttributeError
+            # se la colonna contiene valori numerici o NaN dal CSV
+            col_amm_str = df_aziende[col_amm].astype(str).str.strip()
+            pass_df = df_aziende[col_amm_str == 'PASS']
+            warn_df = df_aziende[col_amm_str.str.startswith('WARN', na=False)]
+            fail_df = df_aziende[col_amm_str.str.startswith('FAIL', na=False)]
 
             ca1, ca2, ca3 = st.columns(3)
             ca1.metric("PASS — Ammesse", str(len(pass_df)), "conformi al Rulebook")
@@ -490,12 +493,12 @@ with tab_overview:
             if not fail_df.empty:
                 st.markdown("#### Aziende che violano i criteri di ammissione")
                 for _, row in fail_df.iterrows():
-                    st.error(f"FAIL: {row['Azienda']} ({row['Ticker']}) — {row[col_amm]}")
+                    st.error(f"FAIL: {row['Azienda']} ({row['Ticker']}) — {str(row[col_amm])}")
 
             if not warn_df.empty:
                 st.markdown("#### Aziende con dati mancanti — verifica consigliata")
                 for _, row in warn_df.iterrows():
-                    st.warning(f"WARN: {row['Azienda']} ({row['Ticker']}) — {row[col_amm]}")
+                    st.warning(f"WARN: {row['Azienda']} ({row['Ticker']}) — {str(row[col_amm])}")
 
             # Tabella completa filtri
             cols_show = ['Ticker', 'Azienda', 'Tier']
@@ -508,7 +511,7 @@ with tab_overview:
 
             # Alert delisting
             if col_del:
-                del_alert = df_aziende[df_aziende[col_del] == 'ALERT']
+                del_alert = df_aziende[df_aziende[col_del].astype(str).str.strip() == 'ALERT']
                 if not del_alert.empty:
                     st.markdown("#### Allerte Delisting")
                     for _, row in del_alert.iterrows():
@@ -622,7 +625,7 @@ with tab_watchlist:
         pronte = 0
         if 'Flag_Ammissione' in df_wl.columns and 'Giorni_Silenzio' in df_wl.columns:
             pronte = len(df_wl[
-                (df_wl['Flag_Ammissione'] == 'PASS') &
+                (df_wl['Flag_Ammissione'].astype(str).str.strip() == 'PASS') &
                 (df_wl['Giorni_Silenzio'] <= 45)
             ])
 
