@@ -1,5 +1,8 @@
 streamlit
 pandas
+numpy
 plotly
 yfinance
-st-gsheets-connection
+matplotlib
+reportlab
+pytz
