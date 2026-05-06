@@ -52,6 +52,8 @@ st.markdown("""
     }
 
     /* --- HEADER FISSO STILE BLOOMBERG --- */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
     .ggiv-header {
         position: fixed !important;
         top: 0 !important;
@@ -59,43 +61,93 @@ st.markdown("""
         width: 100vw !important;
         height: 52px !important;
         background-color: #060910 !important;
-        border-bottom: 1px solid #c9a84c !important;
+        border-bottom: 1px solid #1a2d45 !important;
         z-index: 9999999 !important;
         display: flex !important;
         align-items: center !important;
-        padding: 0 24px !important;
-        font-family: 'Courier New', monospace !important;
+        padding: 0 20px !important;
         white-space: nowrap !important;
         overflow: hidden !important;
         gap: 0 !important;
+        font-family: 'Inter', 'Segoe UI', system-ui, sans-serif !important;
     }
-    .ggiv-logo {
-        font-size: 15px !important;
-        font-weight: bold !important;
-        color: #c9a84c !important;
-        letter-spacing: 0.15em !important;
-        margin-right: 28px !important;
+
+    /* Logo GGIV — sinistra */
+    .ggiv-logo-block {
+        display: flex !important;
+        align-items: center !important;
+        gap: 6px !important;
         flex-shrink: 0 !important;
+        margin-right: 20px !important;
     }
+    .ggiv-hex {
+        font-size: 16px !important;
+        color: #c9a84c !important;
+        line-height: 1 !important;
+    }
+    .ggiv-name {
+        font-size: 13px !important;
+        font-weight: 700 !important;
+        color: #c9a84c !important;
+        letter-spacing: 0.12em !important;
+        font-family: 'Inter', sans-serif !important;
+    }
+
+    /* Blocco valore indice GGIV */
+    .ggiv-idx-block {
+        display: flex !important;
+        align-items: baseline !important;
+        gap: 8px !important;
+        flex-shrink: 0 !important;
+        margin-right: 20px !important;
+    }
+    .ggiv-idx-label {
+        font-size: 9px !important;
+        font-weight: 600 !important;
+        color: #7a8fa6 !important;
+        letter-spacing: 0.12em !important;
+        text-transform: uppercase !important;
+        font-family: 'Inter', sans-serif !important;
+    }
+    .ggiv-idx-value {
+        font-size: 18px !important;
+        font-weight: 600 !important;
+        color: #ffffff !important;
+        letter-spacing: -0.02em !important;
+        font-family: 'Inter', sans-serif !important;
+        font-variant-numeric: tabular-nums !important;
+    }
+    .ggiv-idx-delta {
+        font-size: 11px !important;
+        font-weight: 500 !important;
+        font-family: 'Inter', sans-serif !important;
+        font-variant-numeric: tabular-nums !important;
+    }
+
     .ggiv-divider {
         width: 1px !important;
         height: 28px !important;
         background: #1a3a5c !important;
-        margin-right: 28px !important;
+        margin: 0 20px !important;
         flex-shrink: 0 !important;
     }
     .ticker-scroll {
         display: flex !important;
-        gap: 32px !important;
+        gap: 28px !important;
         overflow: hidden !important;
         flex: 1 !important;
     }
-    .t-item { display: inline-flex; align-items: baseline; gap: 6px; flex-shrink: 0; }
-    .t-name { font-size: 11px; color: #7a8fa6; letter-spacing: 0.05em; }
-    .t-price { font-size: 13px; font-weight: bold; color: #e8eaf0; }
-    .t-up { color: #00d4aa; font-size: 11px; }
-    .t-down { color: #e05a5a; font-size: 11px; }
-    .t-main { font-size: 13px; font-weight: bold; color: #c9a84c; margin-right: 32px; flex-shrink: 0; letter-spacing: 0.08em; }
+    .t-item { display: inline-flex; align-items: baseline; gap: 5px; flex-shrink: 0; }
+    .t-name  { font-size: 10px; color: #7a8fa6; letter-spacing: 0.04em;
+                font-family: 'Inter', sans-serif; font-weight: 500; }
+    .t-price { font-size: 12px; font-weight: 600; color: #e8eaf0;
+                font-family: 'Inter', sans-serif; font-variant-numeric: tabular-nums; }
+    .t-up    { color: #00d4aa; font-size: 11px; font-family: 'Inter', sans-serif;
+                font-variant-numeric: tabular-nums; }
+    .t-down  { color: #e05a5a; font-size: 11px; font-family: 'Inter', sans-serif;
+                font-variant-numeric: tabular-nums; }
+    .t-main  { font-size: 13px; font-weight: bold; color: #c9a84c; margin-right: 32px;
+                flex-shrink: 0; letter-spacing: 0.08em; }
 
     /* --- TAB BAR --- */
     div[data-testid="stTabs"] > div:first-child {
@@ -453,6 +505,66 @@ def get_tutti_indici():
 
 dati_indici = get_tutti_indici()
 
+# ── Valore GGIV live per l'header — calcolo leggero (1mo, cached 2min) ──────
+@st.cache_data(ttl=120)
+def get_valore_header(tickers_tuple):
+    """Calcola solo il valore corrente dell'indice per l'header. Periodo breve = veloce."""
+    import time as _t
+    try:
+        tickers_list = list(tickers_tuple)
+        for tentativo in range(3):
+            try:
+                raw = yf.download(tickers_list, period="5d",
+                                  auto_adjust=True, progress=False)
+                if raw is not None and not raw.empty:
+                    break
+                _t.sleep(2 ** tentativo)
+            except Exception:
+                _t.sleep(2 ** tentativo)
+        else:
+            return None, None, None
+
+        if isinstance(raw.columns, pd.MultiIndex):
+            prezzi = raw['Close'] if 'Close' in raw.columns.get_level_values(0) else None
+        else:
+            prezzi = raw[['Close']] if 'Close' in raw.columns else None
+        if prezzi is None:
+            return None, None, None
+
+        tickers_ok = [t for t in tickers_list if t in prezzi.columns
+                      and prezzi[t].dropna().shape[0] >= 2]
+        if len(tickers_ok) < 2:
+            return None, None, None
+
+        rend   = prezzi[tickers_ok].pct_change().dropna(how='all').fillna(0)
+        pesi_v = np.ones(len(tickers_ok)) / len(tickers_ok)
+        rend_g = pd.Series(rend[tickers_ok].values @ pesi_v, index=rend.index)
+        idx_g  = (1 + rend_g).cumprod() * 100
+
+        valore      = round(float(idx_g.iloc[-1]), 2)
+        delta_oggi  = round(float(rend_g.iloc[-1]) * 100, 2)
+        delta_1w    = round(float((idx_g.iloc[-1] / idx_g.iloc[0] - 1) * 100), 2)
+        return valore, delta_oggi, delta_1w
+    except Exception:
+        return None, None, None
+
+_header_tickers = tuple(df_aziende['Ticker'].dropna().unique()) if not df_aziende.empty else ()
+_valore_idx, _delta_oggi, _delta_1w = get_valore_header(_header_tickers) if _header_tickers else (None, None, None)
+
+# Costruisce il blocco indice per l'header
+if _valore_idx is not None:
+    _d_color  = "#00d4aa" if _delta_oggi >= 0 else "#e05a5a"
+    _d_sign   = "+" if _delta_oggi >= 0 else ""
+    _idx_html = f"""
+    <div class="ggiv-idx-block">
+        <span class="ggiv-idx-label">GGIV INDEX</span>
+        <span class="ggiv-idx-value">{_valore_idx:.2f}</span>
+        <span class="ggiv-idx-delta" style="color:{_d_color};">{_d_sign}{_delta_oggi:.2f}%</span>
+    </div>
+    <div class="ggiv-divider"></div>"""
+else:
+    _idx_html = '<div class="ggiv-divider"></div>'
+
 def render_ticker_item(name, d):
     cls = "t-up" if d['change_pct'] >= 0 else "t-down"
     sign = "+" if d['change_pct'] >= 0 else ""
@@ -462,8 +574,12 @@ ticker_html = ''.join([render_ticker_item(n, d) for n, d in dati_indici.items()]
 
 st.markdown(f"""
 <div class="ggiv-header">
-    <span class="t-main">⬡ GGIV</span>
+    <div class="ggiv-logo-block">
+        <span class="ggiv-hex">⬡</span>
+        <span class="ggiv-name">GGIV</span>
+    </div>
     <div class="ggiv-divider"></div>
+    {_idx_html}
     <div class="ticker-scroll">{ticker_html}</div>
 </div>
 """, unsafe_allow_html=True)
