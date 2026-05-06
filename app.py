@@ -176,6 +176,39 @@ st.markdown("""
         color: #e8eaf0 !important;
     }
 
+    /* --- DROPDOWN MENU (tendina aperta) --- */
+    [data-baseweb="popover"] { background-color: #0d1b2a !important; }
+    [data-baseweb="menu"]    { background-color: #0d1b2a !important; border: 1px solid #1a2d45 !important; }
+    [role="listbox"]         { background-color: #0d1b2a !important; }
+    [role="option"]          {
+        background-color: #0d1b2a !important;
+        color: #e8eaf0 !important;
+    }
+    [role="option"]:hover,
+    [role="option"][aria-selected="true"] {
+        background-color: #1a2d45 !important;
+        color: #00d4aa !important;
+    }
+    /* Copertura completa BaseWeb list item */
+    [data-baseweb="list-item"],
+    [data-baseweb="list-item"] *,
+    li[role="option"],
+    li[role="option"] * {
+        background-color: #0d1b2a !important;
+        color: #e8eaf0 !important;
+    }
+    li[role="option"]:hover,
+    li[role="option"]:hover * {
+        background-color: #1a3a5c !important;
+        color: #00d4aa !important;
+    }
+    /* Testo selezionato nella box chiusa */
+    [data-baseweb="select"] [data-baseweb="tag"],
+    [data-baseweb="select"] span {
+        color: #e8eaf0 !important;
+        background-color: transparent !important;
+    }
+
     /* --- PROGRESS --- */
     [data-testid="stProgressBar"] > div > div {
         background-color: #00d4aa !important;
