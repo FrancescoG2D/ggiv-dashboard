@@ -554,173 +554,6 @@ def render_grafico_indice(idx_g, idx_b, metriche, altezza=400, titolo_extra=""):
     return fig
 
 
-def render_sentiment_radar(df):
-    """
-    Calcola un sentiment reale dal database:
-    - DSRM status per Tier
-    - % aziende PASS vs WARN vs FAIL
-    - Media giorni silenzio per Tier
-    Restituisce HTML già formattato.
-    """
-    if df.empty:
-        return None
-
-    tier_colors = {'Tier 1': '#e05a5a', 'Tier 2': '#378ADD', 'Tier 3': '#00d4aa'}
-    tiers = ['Tier 1', 'Tier 2', 'Tier 3']
-    blocchi = []
-
-    # Score globale basato su DSRM
-    if 'Fattore_DSRM' in df.columns:
-        media_dsrm = df['Fattore_DSRM'].mean()
-        n_verdi  = (df['Fattore_DSRM'] == 1.0).sum()
-        n_gialli = (df['Fattore_DSRM'] == 0.75).sum()
-        n_rossi  = (df['Fattore_DSRM'] == 0.0).sum()
-        score_glob = int(media_dsrm * 100)
-    else:
-        n_verdi = len(df); n_gialli = 0; n_rossi = 0; score_glob = 75
-
-    if score_glob >= 80:
-        glob_color = "#00d4aa"; glob_label = "SANO"
-    elif score_glob >= 55:
-        glob_color = "#c9a84c"; glob_label = "MODERATO"
-    else:
-        glob_color = "#e05a5a"; glob_label = "ALLERTA"
-
-    # Ammissioni
-    n_pass = n_warn = n_fail = 0
-    if 'Flag_Ammissione' in df.columns:
-        amm = df['Flag_Ammissione'].astype(str).str.strip()
-        n_pass = (amm == 'PASS').sum()
-        n_warn = amm.str.startswith('WARN').sum()
-        n_fail = amm.str.startswith('FAIL').sum()
-
-    html = f"""
-    <div style="background:#0d1b2a; border:1px solid #1a2d45; border-radius:8px; padding:18px 20px;">
-        <div style="font-family:'Courier New',monospace; font-size:10px; color:#7a8fa6;
-                    letter-spacing:0.12em; margin-bottom:14px;">
-            RADAR SENTIMENT — SALUTE DEL PORTAFOGLIO
-        </div>
-
-        <!-- Score globale -->
-        <div style="display:flex; align-items:center; gap:20px; margin-bottom:16px;">
-            <div style="font-size:36px; font-weight:bold; color:{glob_color};
-                        font-family:'Courier New',monospace; line-height:1;">
-                {score_glob}
-            </div>
-            <div>
-                <div style="font-size:13px; font-weight:bold; color:{glob_color};
-                            font-family:'Courier New',monospace; letter-spacing:0.1em;">
-                    {glob_label}
-                </div>
-                <div style="font-size:10px; color:#7a8fa6; font-family:'Courier New',monospace;">
-                    DSRM Health Score / 100
-                </div>
-            </div>
-            <div style="flex:1;">
-                <div style="background:#1a2d45; border-radius:3px; height:8px; overflow:hidden;">
-                    <div style="width:{score_glob}%; background:{glob_color};
-                                height:100%; border-radius:3px;"></div>
-                </div>
-            </div>
-        </div>
-
-        <!-- DSRM conteggi -->
-        <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:14px;">
-            <div style="background:#0a1628; border-radius:5px; padding:10px; text-align:center;
-                        border:1px solid #00d4aa44;">
-                <div style="font-size:22px; font-weight:bold; color:#00d4aa;
-                            font-family:'Courier New',monospace;">{n_verdi}</div>
-                <div style="font-size:9px; color:#7a8fa6; font-family:'Courier New',monospace;
-                            letter-spacing:0.06em;">VERDE ≤45gg</div>
-            </div>
-            <div style="background:#0a1628; border-radius:5px; padding:10px; text-align:center;
-                        border:1px solid #c9a84c44;">
-                <div style="font-size:22px; font-weight:bold; color:#c9a84c;
-                            font-family:'Courier New',monospace;">{n_gialli}</div>
-                <div style="font-size:9px; color:#7a8fa6; font-family:'Courier New',monospace;
-                            letter-spacing:0.06em;">GIALLO 46-90gg</div>
-            </div>
-            <div style="background:#0a1628; border-radius:5px; padding:10px; text-align:center;
-                        border:1px solid #e05a5a44;">
-                <div style="font-size:22px; font-weight:bold; color:#e05a5a;
-                            font-family:'Courier New',monospace;">{n_rossi}</div>
-                <div style="font-size:9px; color:#7a8fa6; font-family:'Courier New',monospace;
-                            letter-spacing:0.06em;">KILL SWITCH &gt;90gg</div>
-            </div>
-        </div>
-
-        <!-- Ammissioni -->
-        <div style="font-family:'Courier New',monospace; font-size:9px; color:#7a8fa6;
-                    letter-spacing:0.08em; margin-bottom:6px;">FILTRI AMMISSIONE</div>
-        <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:8px;">
-            <div style="text-align:center; background:#0e1a10; border-radius:4px; padding:7px;
-                        border:1px solid #00d4aa33;">
-                <div style="font-size:18px; font-weight:bold; color:#00d4aa;
-                            font-family:'Courier New',monospace;">{n_pass}</div>
-                <div style="font-size:9px; color:#7a8fa6; font-family:'Courier New',monospace;">PASS</div>
-            </div>
-            <div style="text-align:center; background:#1a1400; border-radius:4px; padding:7px;
-                        border:1px solid #c9a84c33;">
-                <div style="font-size:18px; font-weight:bold; color:#c9a84c;
-                            font-family:'Courier New',monospace;">{n_warn}</div>
-                <div style="font-size:9px; color:#7a8fa6; font-family:'Courier New',monospace;">WARN</div>
-            </div>
-            <div style="text-align:center; background:#1a0a0a; border-radius:4px; padding:7px;
-                        border:1px solid #e05a5a33;">
-                <div style="font-size:18px; font-weight:bold; color:#e05a5a;
-                            font-family:'Courier New',monospace;">{n_fail}</div>
-                <div style="font-size:9px; color:#7a8fa6; font-family:'Courier New',monospace;">FAIL</div>
-            </div>
-        </div>
-    </div>"""
-
-    # Sentiment per Tier
-    tier_blocks = []
-    for tier in tiers:
-        sub = df[df['Tier'] == tier] if 'Tier' in df.columns else pd.DataFrame()
-        if sub.empty:
-            continue
-        col = tier_colors.get(tier, '#7a8fa6')
-        n = len(sub)
-        if 'Fattore_DSRM' in sub.columns:
-            dsrm_m = sub['Fattore_DSRM'].mean()
-            score_t = int(dsrm_m * 100)
-        else:
-            score_t = 75
-        if 'Giorni_Silenzio' in sub.columns:
-            gg_m = int(sub['Giorni_Silenzio'].mean())
-        else:
-            gg_m = 0
-        tier_blocks.append(f"""
-        <div style="background:#0a1628; border:1px solid {col}44; border-radius:5px;
-                    padding:10px 12px; font-family:'Courier New',monospace;">
-            <div style="font-size:10px; color:{col}; font-weight:bold;
-                        letter-spacing:0.08em; margin-bottom:5px;">{tier}</div>
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-                <div>
-                    <div style="font-size:18px; font-weight:bold; color:{col};">{score_t}</div>
-                    <div style="font-size:9px; color:#7a8fa6;">health score</div>
-                </div>
-                <div style="text-align:right;">
-                    <div style="font-size:13px; color:#e8eaf0;">{n}</div>
-                    <div style="font-size:9px; color:#7a8fa6;">aziende</div>
-                </div>
-                <div style="text-align:right;">
-                    <div style="font-size:13px; color:#e8eaf0;">{gg_m}gg</div>
-                    <div style="font-size:9px; color:#7a8fa6;">media silenzio</div>
-                </div>
-            </div>
-            <div style="background:#1a2d45; border-radius:2px; height:4px; margin-top:7px; overflow:hidden;">
-                <div style="width:{score_t}%; background:{col}; height:100%; border-radius:2px;"></div>
-            </div>
-        </div>""")
-
-    html += f"""
-    <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-top:12px;">
-        {''.join(tier_blocks)}
-    </div>"""
-
-    return html
 
 
 # ==========================================
@@ -739,10 +572,65 @@ tab_home, tab_overview, tab_watchlist, tab_backtest, tab_correlazione, tab_risch
 # --- SCHEDA 0: HOME ---
 with tab_home:
 
-    # ── Radar Sentiment in cima ──────────────────────────────────────────────
-    sentiment_html = render_sentiment_radar(df_aziende)
-    if sentiment_html:
-        st.markdown(sentiment_html, unsafe_allow_html=True)
+    # ── Radar Sentiment — componenti Streamlit nativi (no HTML grezzo) ────────
+    st.caption("RADAR SENTIMENT — SALUTE DEL PORTAFOGLIO")
+
+    if not df_aziende.empty:
+        # Calcola metriche
+        if 'Fattore_DSRM' in df_aziende.columns:
+            media_dsrm = df_aziende['Fattore_DSRM'].mean()
+            n_verdi    = int((df_aziende['Fattore_DSRM'] == 1.0).sum())
+            n_gialli   = int((df_aziende['Fattore_DSRM'] == 0.75).sum())
+            n_rossi    = int((df_aziende['Fattore_DSRM'] == 0.0).sum())
+            score_glob = int(media_dsrm * 100)
+        else:
+            n_verdi = len(df_aziende); n_gialli = 0; n_rossi = 0; score_glob = 75
+
+        n_pass = n_warn = n_fail = 0
+        if 'Flag_Ammissione' in df_aziende.columns:
+            amm    = df_aziende['Flag_Ammissione'].astype(str).str.strip()
+            n_pass = int((amm == 'PASS').sum())
+            n_warn = int(amm.str.startswith('WARN').sum())
+            n_fail = int(amm.str.startswith('FAIL').sum())
+
+        glob_label = "SANO" if score_glob >= 80 else ("MODERATO" if score_glob >= 55 else "ALLERTA")
+
+        # Riga 1 — Score globale + barra
+        sr1c1, sr1c2 = st.columns([1, 3])
+        sr1c1.metric("DSRM HEALTH SCORE", f"{score_glob}/100", glob_label)
+        with sr1c2:
+            st.caption("Livello di salute complessivo basato sul DSRM")
+            st.progress(score_glob / 100)
+
+        # Riga 2 — DSRM conteggi
+        sd1, sd2, sd3 = st.columns(3)
+        sd1.metric("🟢 VERDE ≤45gg",    str(n_verdi),  "comunicazione regolare")
+        sd2.metric("🟡 GIALLO 46-90gg", str(n_gialli), "ritardo comunicazioni")
+        sd3.metric("🔴 KILL SWITCH",    str(n_rossi),  "silenzio >90gg")
+
+        # Riga 3 — Filtri ammissione
+        st.caption("FILTRI AMMISSIONE")
+        sa1, sa2, sa3 = st.columns(3)
+        sa1.metric("✅ PASS", str(n_pass), "conformi al Rulebook")
+        sa2.metric("⚠️ WARN", str(n_warn), "dati mancanti")
+        sa3.metric("❌ FAIL", str(n_fail), "violazione criteri")
+
+        # Riga 4 — Breakdown per Tier
+        tier_colors_label = {'Tier 1': '🔴', 'Tier 2': '🔵', 'Tier 3': '🟢'}
+        tiers_presenti = [t for t in ['Tier 1','Tier 2','Tier 3']
+                          if 'Tier' in df_aziende.columns and t in df_aziende['Tier'].values]
+        if tiers_presenti:
+            st.caption("SALUTE PER TIER")
+            tier_cols = st.columns(len(tiers_presenti))
+            for col_t, tier in zip(tier_cols, tiers_presenti):
+                sub = df_aziende[df_aziende['Tier'] == tier]
+                n_t = len(sub)
+                dsrm_t = int(sub['Fattore_DSRM'].mean() * 100) if 'Fattore_DSRM' in sub.columns else 75
+                gg_t   = int(sub['Giorni_Silenzio'].mean()) if 'Giorni_Silenzio' in sub.columns else 0
+                emoji  = tier_colors_label.get(tier, '⬡')
+                col_t.metric(f"{emoji} {tier}", f"{dsrm_t}/100",
+                             f"{n_t} aziende · {gg_t}gg media silenzio")
+                col_t.progress(dsrm_t / 100)
     else:
         st.warning("Dati portafoglio non disponibili per il radar sentiment.")
 
@@ -1182,14 +1070,14 @@ with tab_backtest:
                 yaxis='y2',
                 hovertemplate='DD: %{y:.1f}%<extra></extra>',
             ))
-            fig_bt2.update_layout(
-                yaxis2=dict(
+            fig_bt2.update_layout(**{
+                'yaxis2': dict(
                     title='Drawdown (%)', overlaying='y', side='right',
-                    gridcolor='#1a2d45', tickfont=dict(color='#e05a5a', size=9),
-                    titlefont=dict(color='#e05a5a', size=9),
+                    gridcolor='#1a2d45',
+                    tickfont=dict(color='#e05a5a', size=9),
                     showgrid=False,
-                ),
-            )
+                )
+            })
             st.plotly_chart(fig_bt2, use_container_width=True)
             st.caption(
                 f"Le linee verticali dorate indicano i ribilanciamenti trimestrali. "
