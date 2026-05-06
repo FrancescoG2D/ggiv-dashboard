@@ -9,7 +9,12 @@ from datetime import datetime
 # ==========================================
 # 1. CONFIGURAZIONE
 # ==========================================
-st.set_page_config(page_title="GGIV Terminal", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(
+    page_title="GGIV Terminal",
+    page_icon="⬡",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 # ==========================================
 # 2. DARK MODE ISTITUZIONALE — CSS GLOBALE
@@ -129,7 +134,10 @@ st.markdown("""
     [data-testid="stMetricLabel"] { color: #7a8fa6 !important; font-size: 11px !important; letter-spacing: 0.06em !important; }
     [data-testid="stMetricValue"] { color: #e8eaf0 !important; font-size: 22px !important; }
     [data-testid="stMetricDelta"] svg { display: none !important; }
-    [data-testid="stMetricDelta"] > div { color: #00d4aa !important; font-size: 12px !important; }
+    /* Delta positivo = verde, negativo = rosso */
+    [data-testid="stMetricDelta"][data-direction="up"] > div   { color: #00d4aa !important; font-size: 12px !important; }
+    [data-testid="stMetricDelta"][data-direction="down"] > div { color: #e05a5a !important; font-size: 12px !important; }
+    [data-testid="stMetricDelta"] > div { color: #7a8fa6 !important; font-size: 12px !important; }
 
     /* --- DATAFRAME --- */
     [data-testid="stDataFrame"], .stDataFrame {
@@ -352,6 +360,18 @@ if not df_aziende.empty and 'Giorni_Silenzio' in df_aziende.columns:
     df_aziende['Peso_Effettivo'] = df_aziende['Peso_Base'] * df_aziende['Fattore_DSRM']
     df_aziende['Percentuale_Persa'] = df_aziende['Peso_Base'] - df_aziende['Peso_Effettivo']
 
+# Aggiorna il titolo della tab browser con DSRM status
+if not df_aziende.empty and 'Fattore_DSRM' in df_aziende.columns:
+    _n_kill = int((df_aziende['Fattore_DSRM'] == 0.0).sum())
+    _n_warn = int((df_aziende['Fattore_DSRM'] == 0.75).sum())
+    if _n_kill > 0:
+        _title = f"⬡ GGIV ⚠ {_n_kill} KILL"
+    elif _n_warn > 0:
+        _title = f"⬡ GGIV · {_n_warn} WARN"
+    else:
+        _title = "⬡ GGIV Terminal — OK"
+    st.markdown(f"<title>{_title}</title>", unsafe_allow_html=True)
+
 # ==========================================
 # 6. TICKER HEADER
 # ==========================================
@@ -426,9 +446,61 @@ st.sidebar.markdown("""
 """, unsafe_allow_html=True)
 st.sidebar.markdown("---")
 st.sidebar.markdown('<p style="font-size:11px; color:#7a8fa6; letter-spacing:0.08em;">PARAMETRI PORTAFOGLIO</p>', unsafe_allow_html=True)
-capitale_globale = st.sidebar.number_input("Capitale AUM (€):", min_value=1000, value=100000, step=1000)
+
+# AUM persistente via session_state
+if 'capitale_globale' not in st.session_state:
+    st.session_state['capitale_globale'] = 100000
+capitale_globale = st.sidebar.number_input(
+    "Capitale AUM (€):", min_value=1000,
+    value=st.session_state['capitale_globale'], step=1000,
+    key='capitale_globale'
+)
+
 st.sidebar.markdown("---")
-st.sidebar.markdown(f'<p style="font-size:10px; color:#7a8fa6;">Ultimo aggiornamento: {datetime.now().strftime("%d/%m/%Y %H:%M")}</p>', unsafe_allow_html=True)
+
+# Sidebar arricchita — stato DSRM + prossimo ribilanciamento
+if not df_aziende.empty and 'Fattore_DSRM' in df_aziende.columns:
+    n_v = int((df_aziende['Fattore_DSRM'] == 1.0).sum())
+    n_g = int((df_aziende['Fattore_DSRM'] == 0.75).sum())
+    n_r = int((df_aziende['Fattore_DSRM'] == 0.0).sum())
+    st.sidebar.markdown('<p style="font-size:11px; color:#7a8fa6; letter-spacing:0.08em;">DSRM STATUS</p>', unsafe_allow_html=True)
+    st.sidebar.markdown(f"""
+    <div style="font-family:'Courier New',monospace; font-size:12px; line-height:2;">
+        <span style="color:#00d4aa;">●</span> Verde: <b>{n_v}</b>&nbsp;&nbsp;
+        <span style="color:#c9a84c;">●</span> Giallo: <b>{n_g}</b>&nbsp;&nbsp;
+        <span style="color:#e05a5a;">●</span> Kill: <b>{n_r}</b>
+    </div>""", unsafe_allow_html=True)
+    st.sidebar.markdown("---")
+
+# Prossimo ribilanciamento trimestrale
+oggi_dt = datetime.now()
+mese = oggi_dt.month
+anno = oggi_dt.year
+# Q1=Mar, Q2=Giu, Q3=Set, Q4=Dic — primo lunedì del mese
+prossimi = []
+for m in [3, 6, 9, 12]:
+    y = anno if m > mese else anno + (1 if mese > m else 0)
+    # Trova primo lunedì di quel mese
+    import calendar
+    primo_giorno, _ = calendar.monthrange(y, m)
+    data_primo = datetime(y, m, 1)
+    giorni_al_lun = (7 - data_primo.weekday()) % 7
+    primo_lun = datetime(y, m, 1 + giorni_al_lun)
+    if primo_lun > oggi_dt:
+        prossimi.append((primo_lun, f"Q{[3,6,9,12].index(m)+1}"))
+        break
+if prossimi:
+    data_rib, label_rib = prossimi[0]
+    giorni_al_rib = (data_rib - oggi_dt).days
+    st.sidebar.markdown('<p style="font-size:11px; color:#7a8fa6; letter-spacing:0.08em;">PROSSIMO RIBILANCIAMENTO</p>', unsafe_allow_html=True)
+    st.sidebar.markdown(f"""
+    <div style="font-family:'Courier New',monospace; font-size:12px; color:#c9a84c;">
+        {label_rib} — {data_rib.strftime('%d %b %Y')}<br>
+        <span style="font-size:10px; color:#7a8fa6;">tra {giorni_al_rib} giorni</span>
+    </div>""", unsafe_allow_html=True)
+    st.sidebar.markdown("---")
+
+st.sidebar.markdown(f'<p style="font-size:10px; color:#7a8fa6;">Aggiornato: {datetime.now().strftime("%d/%m/%Y %H:%M")}</p>', unsafe_allow_html=True)
 
 # ==========================================
 # 8. FUNZIONI CONDIVISE UI
@@ -439,13 +511,30 @@ def get_indice_live(tickers_tuple, bench="^GSPC", periodo="6mo"):
     """
     Scarica prezzi reali dei costituenti, costruisce serie GGIV ponderata
     e la confronta con S&P 500. Cache 2 minuti per aggiornamento quasi-live.
+    Retry automatico con backoff su rate limit Yahoo Finance.
     Restituisce (serie_ggiv, serie_bench, metriche_dict) o (None, None, None).
     """
+    import time as _time
+
+    def _download_with_retry(tickers_list, periodo, tentativi=3):
+        for i in range(tentativi):
+            try:
+                raw = yf.download(
+                    tickers_list, period=periodo,
+                    auto_adjust=True, progress=False
+                )
+                if raw is not None and not raw.empty:
+                    return raw
+                _time.sleep(2 ** i)
+            except Exception:
+                if i < tentativi - 1:
+                    _time.sleep(2 ** i)
+        return None
+
     try:
         tickers_list = list(tickers_tuple)
-        raw = yf.download(tickers_list + [bench], period=periodo,
-                          auto_adjust=True, progress=False)
-        if raw is None or raw.empty:
+        raw = _download_with_retry(tickers_list + [bench], periodo)
+        if raw is None:
             return None, None, None
 
         if isinstance(raw.columns, pd.MultiIndex):
@@ -464,7 +553,7 @@ def get_indice_live(tickers_tuple, bench="^GSPC", periodo="6mo"):
         if len(tickers_ok) < 2:
             return None, bench_serie, None
 
-        # Pesi uguali normalizzati (usa Peso_Effettivo se disponibile nel df_aziende)
+        # Pesi DSRM+UCITS se disponibili, altrimenti equiponderati
         pesi = {}
         if not df_aziende.empty and 'Peso_Effettivo' in df_aziende.columns:
             df_p = df_aziende[df_aziende['Ticker'].isin(tickers_ok)].copy()
@@ -484,12 +573,11 @@ def get_indice_live(tickers_tuple, bench="^GSPC", periodo="6mo"):
         bench_rend = bench_serie.pct_change().dropna().reindex(rend_g.index).fillna(0)
         idx_b      = (1 + bench_rend).cumprod() * 100
 
-        # Metriche rapide
-        ny   = max(len(rend_g) / 252, 0.01)
-        cagr = (idx_g.iloc[-1] / 100) ** (1/ny) - 1
-        vol  = rend_g.std() * np.sqrt(252)
-        sh   = (cagr - 0.035) / vol if vol > 0 else 0
-        dd   = ((idx_g - idx_g.cummax()) / idx_g.cummax()).min()
+        ny         = max(len(rend_g) / 252, 0.01)
+        cagr       = (idx_g.iloc[-1] / 100) ** (1/ny) - 1
+        vol        = rend_g.std() * np.sqrt(252)
+        sh         = (cagr - 0.035) / vol if vol > 0 else 0
+        dd         = ((idx_g - idx_g.cummax()) / idx_g.cummax()).min()
         delta_oggi = rend_g.iloc[-1] * 100 if len(rend_g) > 0 else 0
 
         metriche = {
@@ -523,13 +611,18 @@ def render_grafico_indice(idx_g, idx_b, metriche, altezza=400, titolo_extra=""):
     ))
     # Linea base 100
     fig.add_hline(y=100, line_dash="dot", line_color="#1a2d45", line_width=1)
-    # Annotazione valore corrente
+    # Annotazione valore corrente — posizionata internamente
     fig.add_annotation(
         x=idx_g.index[-1], y=idx_g.iloc[-1],
-        text=f" {idx_g.iloc[-1]:.1f}",
+        text=f"  {idx_g.iloc[-1]:.1f}",
         showarrow=False,
         font=dict(color='#00d4aa', size=11, family='Courier New'),
-        xanchor='left',
+        xanchor='right',
+        xref='x', yref='y',
+        bgcolor='rgba(13,27,42,0.7)',
+        bordercolor='#00d4aa',
+        borderwidth=1,
+        borderpad=3,
     )
     fig.update_layout(
         paper_bgcolor='#0d1b2a', plot_bgcolor='#0d1b2a',
@@ -652,20 +745,18 @@ with tab_home:
     if not df_aziende.empty and 'Ticker' in df_aziende.columns:
         tickers_live = tuple(df_aziende['Ticker'].dropna().unique())
 
-        # Selettore periodo
-        col_p1, col_p2, col_p3, col_p4, col_p5 = st.columns([1,1,1,1,4])
-        periodo_sel = "6mo"
-        if col_p1.button("1M"):  periodo_sel = "1mo"
-        if col_p2.button("3M"):  periodo_sel = "3mo"
-        if col_p3.button("6M"):  periodo_sel = "6mo"
-        if col_p4.button("1A"):  periodo_sel = "1y"
-        # Mantieni periodo in session_state
+        # Selettore periodo — st.radio orizzontale, session_state corretto
+        periodo_opzioni = {"1M": "1mo", "3M": "3mo", "6M": "6mo", "1A": "1y"}
         if 'periodo_home' not in st.session_state:
-            st.session_state['periodo_home'] = "6mo"
-        for lbl, val in [("1M","1mo"),("3M","3mo"),("6M","6mo"),("1A","1y")]:
-            if locals().get(f'col_p{["1M","3M","6M","1A"].index(lbl)+1}'):
-                st.session_state['periodo_home'] = val
-        periodo_attivo = st.session_state.get('periodo_home', "6mo")
+            st.session_state['periodo_home'] = "6M"
+        periodo_label = st.radio(
+            "Periodo:", list(periodo_opzioni.keys()),
+            index=list(periodo_opzioni.keys()).index(st.session_state['periodo_home']),
+            horizontal=True, key='periodo_home_radio',
+            label_visibility='collapsed'
+        )
+        st.session_state['periodo_home'] = periodo_label
+        periodo_attivo = periodo_opzioni[periodo_label]
 
         with st.spinner("Aggiornamento dati indice..."):
             idx_g_home, idx_b_home, met_home = get_indice_live(
@@ -673,20 +764,25 @@ with tab_home:
             )
 
         if idx_g_home is not None and idx_b_home is not None:
-            # KPI strip
-            delta_col = "#00d4aa" if met_home['delta_oggi'] >= 0 else "#e05a5a"
-            delta_sign = "+" if met_home['delta_oggi'] >= 0 else ""
             kc1, kc2, kc3, kc4, kc5 = st.columns(5)
-            kc1.metric("VALORE INDICE", f"{met_home['valore']:.1f}", "base 100")
-            kc2.metric("RENDIM. OGGI",
-                       f"{delta_sign}{met_home['delta_oggi']:.2f}%",
-                       "ultimo dato disponibile")
-            kc3.metric("CAGR",
+            delta_oggi_sign = "+" if met_home['delta_oggi'] >= 0 else ""
+            kc1.metric("VALORE INDICE",
+                       f"{met_home['valore']:.1f}",
+                       f"{delta_oggi_sign}{met_home['delta_oggi']:.2f}% oggi")
+            kc2.metric("CAGR",
                        f"{met_home['cagr']*100:+.1f}%",
-                       f"periodo selezionato")
-            kc4.metric("SHARPE",    f"{met_home['sharpe']:.2f}", "rf=3.5%")
-            kc5.metric("MAX DD",    f"{met_home['max_dd']*100:.1f}%",
-                       f"{met_home['n_costituenti']} costituenti")
+                       "annualizzato periodo")
+            kc3.metric("SHARPE RATIO",
+                       f"{met_home['sharpe']:.2f}",
+                       "rf=3.5%")
+            kc4.metric("MAX DRAWDOWN",
+                       f"{met_home['max_dd']*100:.1f}%",
+                       "peak-to-trough",
+                       delta_color="inverse")
+            kc5.metric("VOLATILITÀ",
+                       f"{met_home['vol']*100:.1f}%",
+                       f"{met_home['n_costituenti']} costituenti",
+                       delta_color="off")
 
             fig_home = render_grafico_indice(
                 idx_g_home, idx_b_home, met_home,
@@ -870,7 +966,7 @@ with tab_overview:
                 for _, row in fail_df.iterrows():
                     st.error(f"FAIL: {row['Azienda']} ({row['Ticker']}) — {str(row[col_amm])}")
             if not warn_df.empty:
-                with st.expander(f"⚠️ {len(warn_df)} aziende con dati mancanti"):
+                with st.expander(f"⚠️ {len(warn_df)} aziende con dati mancanti", expanded=True):
                     for _, row in warn_df.iterrows():
                         st.warning(f"WARN: {row['Azienda']} ({row['Ticker']}) — {str(row[col_amm])}")
 
@@ -983,35 +1079,93 @@ with tab_overview:
 
 # --- SCHEDA 2: WATCHLIST ---
 with tab_watchlist:
-    st.markdown("### AZIENDE IN OSSERVAZIONE — INCUBATORE")
+    st.markdown("""
+    <div style="font-family:'Courier New',monospace; font-size:11px; color:#7a8fa6;
+                letter-spacing:0.1em; margin-bottom:6px;">
+        INCUBATORE — AZIENDE IN OSSERVAZIONE
+    </div>""", unsafe_allow_html=True)
     st.caption("Aziende sotto scansione DSRM per eventuale ingresso nell'indice. Buffer anti-turnover: 15%.")
+
     if not df_wl.empty:
         colonne_da_mostrare = ['Ticker', 'Azienda']
-        for c in ['Data_Ultima_News', 'Giorni_Silenzio',
+        for c in ['Tier', 'Data_Ultima_News', 'Giorni_Silenzio',
                   'Market_Cap_USD', 'ADTV_3M_USD', 'Free_Float_Pct',
                   'Flag_Ammissione', 'Flag_Delisting']:
             if c in df_wl.columns:
                 colonne_da_mostrare.append(c)
 
-        # Evidenzia le aziende pronte per l'ingresso (PASS ammissione, DSRM verde)
+        # Calcola stato "pronta" per ogni azienda
         df_wl_show = df_wl[colonne_da_mostrare].copy()
-        pronte = 0
+        df_wl_show['_pronta'] = False
         if 'Flag_Ammissione' in df_wl.columns and 'Giorni_Silenzio' in df_wl.columns:
-            pronte = len(df_wl[
+            df_wl_show['_pronta'] = (
                 (df_wl['Flag_Ammissione'].astype(str).str.strip() == 'PASS') &
                 (df_wl['Giorni_Silenzio'] <= 45)
-            ])
+            )
+        pronte = int(df_wl_show['_pronta'].sum())
 
-        cw1, cw2 = st.columns(2)
+        # KPI
+        cw1, cw2, cw3 = st.columns(3)
         cw1.metric("IN OSSERVAZIONE", str(len(df_wl)), "aziende candidate")
         cw2.metric("PRONTE PER INGRESSO", str(pronte), "PASS + DSRM verde")
+        n_fail_wl = int(df_wl['Flag_Ammissione'].astype(str).str.startswith('FAIL').sum()) if 'Flag_Ammissione' in df_wl.columns else 0
+        cw3.metric("NON IDONEE", str(n_fail_wl), "non superano filtri")
 
+        # Alert pronte subito visibili
         if pronte > 0:
-            st.info(f"{pronte} aziende hanno superato tutti i filtri e possono essere valutate dall'Index Committee.")
+            df_pronte = df_wl_show[df_wl_show['_pronta']]
+            nomi_pronti = ", ".join(df_pronte['Azienda'].tolist())
+            st.success(f"✅ {pronte} aziende pronte per valutazione Index Committee: **{nomi_pronti}**")
 
-        st.dataframe(df_wl_show, use_container_width=True)
+        # Controlli filtro + ordinamento
+        fc1, fc2, fc3 = st.columns([1, 1, 2])
+        filtro_stato = fc1.selectbox(
+            "Filtra per stato:", ["Tutte", "Solo PASS", "Solo WARN", "Solo FAIL"],
+            key='wl_filtro'
+        )
+        ordina_per = fc2.selectbox(
+            "Ordina per:",
+            ["Giorni_Silenzio", "Flag_Ammissione", "Market_Cap_USD", "Azienda"],
+            key='wl_ordina'
+        )
+
+        # Applica filtro
+        df_filtered = df_wl_show.copy()
+        if filtro_stato == "Solo PASS" and 'Flag_Ammissione' in df_filtered.columns:
+            df_filtered = df_filtered[df_filtered['Flag_Ammissione'].astype(str).str.strip() == 'PASS']
+        elif filtro_stato == "Solo WARN" and 'Flag_Ammissione' in df_filtered.columns:
+            df_filtered = df_filtered[df_filtered['Flag_Ammissione'].astype(str).str.startswith('WARN')]
+        elif filtro_stato == "Solo FAIL" and 'Flag_Ammissione' in df_filtered.columns:
+            df_filtered = df_filtered[df_filtered['Flag_Ammissione'].astype(str).str.startswith('FAIL')]
+
+        # Applica ordinamento
+        if ordina_per in df_filtered.columns:
+            df_filtered = df_filtered.sort_values(ordina_per, ascending=True, na_position='last')
+
+        # Porta le aziende pronte in cima
+        df_pronte_top  = df_filtered[df_filtered['_pronta']].copy()
+        df_altre       = df_filtered[~df_filtered['_pronta']].copy()
+        df_finale      = pd.concat([df_pronte_top, df_altre], ignore_index=True)
+
+        # Rimuovi colonna helper
+        cols_display = [c for c in df_finale.columns if c != '_pronta']
+
+        # Formatta Market Cap leggibile
+        if 'Market_Cap_USD' in df_finale.columns:
+            df_finale['Market_Cap_USD'] = df_finale['Market_Cap_USD'].apply(
+                lambda x: f"${x/1e9:.1f}B" if pd.notna(x) and x >= 1e9
+                          else (f"${x/1e6:.0f}M" if pd.notna(x) and x > 0 else "N/D")
+            )
+
+        st.dataframe(
+            df_finale[cols_display],
+            use_container_width=True,
+            hide_index=True,
+            height=min(500, (len(df_finale) + 1) * 38),
+        )
+        st.caption(f"Mostrate {len(df_finale)} aziende · Le righe in cima sono quelle pronte per l'ingresso (PASS + DSRM verde)")
     else:
-        st.info("Watchlist vuota o in caricamento.")
+        st.info("Watchlist vuota o in caricamento. Esegui il Radar Bot per popolarla.")
 
 # --- SCHEDA 3: BACKTEST ---
 with tab_backtest:
@@ -1025,12 +1179,17 @@ with tab_backtest:
     # Grafico reale — stessi dati del Tear Sheet PDF
     if not df_aziende.empty and 'Ticker' in df_aziende.columns:
         tickers_bt_live = tuple(df_aziende['Ticker'].dropna().unique())
+        opzioni_bt = ["1y", "2y", "3y", "5y", "max"]
+        label_bt   = {"1y":"1 Anno","2y":"2 Anni","3y":"3 Anni","5y":"5 Anni","max":"Max storia"}
+        if 'periodo_bt' not in st.session_state:
+            st.session_state['periodo_bt'] = "2y"
         col_bt1, col_bt2 = st.columns([1, 3])
         periodo_bt = col_bt1.selectbox(
             "Periodo storico:",
-            ["1y", "2y", "3y", "5y", "max"],
-            index=1,
-            format_func=lambda x: {"1y":"1 Anno","2y":"2 Anni","3y":"3 Anni","5y":"5 Anni","max":"Max storia"}[x]
+            opzioni_bt,
+            index=opzioni_bt.index(st.session_state['periodo_bt']),
+            format_func=lambda x: label_bt[x],
+            key='periodo_bt'
         )
 
         with st.spinner("Scaricando serie storica reale..."):
@@ -1418,7 +1577,11 @@ with tab_backtest:
 with tab_correlazione:
 
     # ---- SEZIONE A: SENSORE MACRO ----
-    st.markdown("### SENSORE MACRO — CONTESTO DI MERCATO")
+    st.markdown("""
+    <div style="font-family:'Courier New',monospace; font-size:11px; color:#7a8fa6;
+                letter-spacing:0.1em; margin-bottom:8px;">
+        SENSORE MACRO — CONTESTO DI MERCATO
+    </div>""", unsafe_allow_html=True)
 
     @st.cache_data(ttl=300)
     def get_macro_data():
@@ -1709,7 +1872,11 @@ with tab_correlazione:
     st.markdown("---")
 
     # ---- SEZIONE B: MATRICE DI CORRELAZIONE ----
-    st.markdown("### MATRICE DI CORRELAZIONE — DECORRELAZIONE TIER")
+    st.markdown("""
+    <div style="font-family:'Courier New',monospace; font-size:11px; color:#7a8fa6;
+                letter-spacing:0.1em; margin-bottom:6px;">
+        MATRICE DI CORRELAZIONE — DECORRELAZIONE TIER
+    </div>""", unsafe_allow_html=True)
     st.caption("Rendimenti giornalieri su 90 giorni. I ticker OTC/ASX con storia insufficiente su Yahoo Finance vengono esclusi automaticamente con spiegazione.")
 
     @st.cache_data(ttl=3600)
