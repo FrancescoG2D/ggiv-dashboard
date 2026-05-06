@@ -745,17 +745,18 @@ with tab_home:
     if not df_aziende.empty and 'Ticker' in df_aziende.columns:
         tickers_live = tuple(df_aziende['Ticker'].dropna().unique())
 
-        # Selettore periodo — st.radio orizzontale, session_state corretto
+        # Selettore periodo — gestione robusta via key del radio
         periodo_opzioni = {"1M": "1mo", "3M": "3mo", "6M": "6mo", "1A": "1y"}
-        if 'periodo_home' not in st.session_state:
-            st.session_state['periodo_home'] = "6M"
+        labels_periodo  = list(periodo_opzioni.keys())
+        # Inizializza con valore sicuro (label, non codice yfinance)
+        if st.session_state.get('periodo_home_radio') not in labels_periodo:
+            st.session_state['periodo_home_radio'] = "6M"
         periodo_label = st.radio(
-            "Periodo:", list(periodo_opzioni.keys()),
-            index=list(periodo_opzioni.keys()).index(st.session_state['periodo_home']),
-            horizontal=True, key='periodo_home_radio',
+            "Periodo:", labels_periodo,
+            horizontal=True,
+            key='periodo_home_radio',
             label_visibility='collapsed'
         )
-        st.session_state['periodo_home'] = periodo_label
         periodo_attivo = periodo_opzioni[periodo_label]
 
         with st.spinner("Aggiornamento dati indice..."):
@@ -1181,7 +1182,8 @@ with tab_backtest:
         tickers_bt_live = tuple(df_aziende['Ticker'].dropna().unique())
         opzioni_bt = ["1y", "2y", "3y", "5y", "max"]
         label_bt   = {"1y":"1 Anno","2y":"2 Anni","3y":"3 Anni","5y":"5 Anni","max":"Max storia"}
-        if 'periodo_bt' not in st.session_state:
+        # Inizializza con valore sicuro
+        if st.session_state.get('periodo_bt') not in opzioni_bt:
             st.session_state['periodo_bt'] = "2y"
         col_bt1, col_bt2 = st.columns([1, 3])
         periodo_bt = col_bt1.selectbox(
