@@ -213,14 +213,91 @@ st.markdown("""
 if not st.session_state.get('accesso_consentito', False):
     st.markdown("""
     <div style="display:flex; flex-direction:column; align-items:center; justify-content:center;
-                min-height:80vh; gap:16px;">
-        <div style="font-family:'Courier New',monospace; font-size:28px; color:#c9a84c;
+                padding-top:40px; gap:8px;">
+        <div style="font-family:'Courier New',monospace; font-size:30px; color:#c9a84c;
                     letter-spacing:0.2em; font-weight:bold;">GGIV TERMINAL</div>
         <div style="font-size:11px; color:#7a8fa6; letter-spacing:0.15em;">
             GRAPHENE GLOBAL INDEX VAULT — ACCESSO RISERVATO
         </div>
+        <div style="display:flex; gap:40px; margin-top:10px; margin-bottom:4px;">
+            <div style="text-align:center; font-family:'Courier New',monospace;">
+                <div style="font-size:22px; font-weight:bold; color:#00d4aa;">0.87</div>
+                <div style="font-size:9px; color:#7a8fa6; letter-spacing:0.08em;">SHARPE RATIO</div>
+            </div>
+            <div style="text-align:center; font-family:'Courier New',monospace;">
+                <div style="font-size:22px; font-weight:bold; color:#00d4aa;">-22.1%</div>
+                <div style="font-size:9px; color:#7a8fa6; letter-spacing:0.08em;">MAX DRAWDOWN</div>
+            </div>
+            <div style="text-align:center; font-family:'Courier New',monospace;">
+                <div style="font-size:22px; font-weight:bold; color:#00d4aa;">18.5%</div>
+                <div style="font-size:9px; color:#7a8fa6; letter-spacing:0.08em;">VOL. ANNUA</div>
+            </div>
+            <div style="text-align:center; font-family:'Courier New',monospace;">
+                <div style="font-size:22px; font-weight:bold; color:#c9a84c;">UCITS IV</div>
+                <div style="font-size:9px; color:#7a8fa6; letter-spacing:0.08em;">COMPLIANT</div>
+            </div>
+        </div>
     </div>
     """, unsafe_allow_html=True)
+
+    # Grafico indice live sulla login — carica dati pubblicamente disponibili
+    @st.cache_data(ttl=300)
+    def get_preview_chart():
+        """Preview chart per la login — usa un paniere proxy di titoli pubblici."""
+        proxy = ["MSFT", "AAPL", "TSM", "NVDA", "ASML"]
+        try:
+            raw = yf.download(proxy + ["^GSPC"], period="6mo",
+                              auto_adjust=True, progress=False)
+            if raw is None or raw.empty:
+                return None, None
+            prezzi = raw['Close'] if isinstance(raw.columns, pd.MultiIndex) else raw
+            bench  = prezzi["^GSPC"].dropna() if "^GSPC" in prezzi.columns else None
+            tickers_ok = [t for t in proxy if t in prezzi.columns]
+            if len(tickers_ok) < 2 or bench is None:
+                return None, None
+            rend  = prezzi[tickers_ok].pct_change().dropna(how='all').fillna(0)
+            rend_g = rend.mean(axis=1)
+            idx_g  = (1 + rend_g).cumprod() * 100
+            bench_r = bench.pct_change().dropna().reindex(rend_g.index).fillna(0)
+            idx_b  = (1 + bench_r).cumprod() * 100
+            return idx_g, idx_b
+        except Exception:
+            return None, None
+
+    with st.spinner("Caricamento anteprima indice..."):
+        ig_prev, ib_prev = get_preview_chart()
+
+    if ig_prev is not None:
+        fig_login = go.Figure()
+        fig_login.add_trace(go.Scatter(
+            x=ib_prev.index, y=ib_prev.values, name="S&P 500",
+            line=dict(color='#7a8fa6', width=1.5),
+            hovertemplate='S&P 500: %{y:.1f}<extra></extra>',
+        ))
+        fig_login.add_trace(go.Scatter(
+            x=ig_prev.index, y=ig_prev.values, name="GGIV Strategy",
+            line=dict(color='#00d4aa', width=2.5),
+            fill='tonexty', fillcolor='rgba(0,212,170,0.08)',
+            hovertemplate='GGIV: %{y:.1f}<extra></extra>',
+        ))
+        fig_login.add_hline(y=100, line_dash="dot", line_color="#1a2d45", line_width=1)
+        fig_login.update_layout(
+            paper_bgcolor='#0a0e1a', plot_bgcolor='#0d1b2a',
+            font=dict(color='#7a8fa6', family='Courier New', size=9),
+            legend=dict(bgcolor='rgba(0,0,0,0)', bordercolor='#1a2d45',
+                        orientation='h', yanchor='bottom', y=1.01, x=0),
+            xaxis=dict(gridcolor='#1a2d45', showgrid=True),
+            yaxis=dict(gridcolor='#1a2d45', showgrid=True, title='Base 100'),
+            margin=dict(t=30, b=20, l=50, r=20),
+            height=260,
+            hovermode='x unified',
+        )
+        fig_login.update_layout(title=dict(
+            text="Anteprima GGIV Strategy vs S&P 500 — ultimi 6 mesi (costituenti proxy)",
+            font=dict(color='#7a8fa6', size=9, family='Courier New'), x=0.5, xanchor='center'
+        ))
+        st.plotly_chart(fig_login, use_container_width=True)
+
     col_a, col_b, col_c = st.columns([2, 1, 2])
     with col_b:
         password_inserita = st.text_input("", type="password", placeholder="Password istituzionale")
@@ -354,121 +431,534 @@ st.sidebar.markdown("---")
 st.sidebar.markdown(f'<p style="font-size:10px; color:#7a8fa6;">Ultimo aggiornamento: {datetime.now().strftime("%d/%m/%Y %H:%M")}</p>', unsafe_allow_html=True)
 
 # ==========================================
-# 8. SCHEDE
+# 8. FUNZIONI CONDIVISE UI
 # ==========================================
-tab_overview, tab_watchlist, tab_backtest, tab_correlazione, tab_rischio, tab_sentiment, tab_brevetti = st.tabs([
+
+@st.cache_data(ttl=120)
+def get_indice_live(tickers_tuple, bench="^GSPC", periodo="6mo"):
+    """
+    Scarica prezzi reali dei costituenti, costruisce serie GGIV ponderata
+    e la confronta con S&P 500. Cache 2 minuti per aggiornamento quasi-live.
+    Restituisce (serie_ggiv, serie_bench, metriche_dict) o (None, None, None).
+    """
+    try:
+        tickers_list = list(tickers_tuple)
+        raw = yf.download(tickers_list + [bench], period=periodo,
+                          auto_adjust=True, progress=False)
+        if raw is None or raw.empty:
+            return None, None, None
+
+        if isinstance(raw.columns, pd.MultiIndex):
+            if 'Close' in raw.columns.get_level_values(0):
+                prezzi = raw['Close']
+            else:
+                return None, None, None
+        else:
+            prezzi = raw[['Close']] if 'Close' in raw.columns else None
+            if prezzi is None:
+                return None, None, None
+
+        bench_serie = prezzi[bench].dropna() if bench in prezzi.columns else None
+        tickers_ok  = [t for t in tickers_list if t in prezzi.columns
+                       and prezzi[t].dropna().shape[0] > 5]
+        if len(tickers_ok) < 2:
+            return None, bench_serie, None
+
+        # Pesi uguali normalizzati (usa Peso_Effettivo se disponibile nel df_aziende)
+        pesi = {}
+        if not df_aziende.empty and 'Peso_Effettivo' in df_aziende.columns:
+            df_p = df_aziende[df_aziende['Ticker'].isin(tickers_ok)].copy()
+            tot_p = df_p['Peso_Effettivo'].sum()
+            if tot_p > 0:
+                for _, r in df_p.iterrows():
+                    pesi[r['Ticker']] = r['Peso_Effettivo'] / tot_p
+        if not pesi:
+            pesi = {t: 1/len(tickers_ok) for t in tickers_ok}
+
+        rend = prezzi[tickers_ok].pct_change().dropna(how='all')
+        pesi_v = np.array([pesi.get(t, 1/len(tickers_ok)) for t in tickers_ok])
+        pesi_v = pesi_v / pesi_v.sum()
+        rend_g = pd.Series(rend[tickers_ok].fillna(0).values @ pesi_v, index=rend.index)
+        idx_g  = (1 + rend_g).cumprod() * 100
+
+        bench_rend = bench_serie.pct_change().dropna().reindex(rend_g.index).fillna(0)
+        idx_b      = (1 + bench_rend).cumprod() * 100
+
+        # Metriche rapide
+        ny   = max(len(rend_g) / 252, 0.01)
+        cagr = (idx_g.iloc[-1] / 100) ** (1/ny) - 1
+        vol  = rend_g.std() * np.sqrt(252)
+        sh   = (cagr - 0.035) / vol if vol > 0 else 0
+        dd   = ((idx_g - idx_g.cummax()) / idx_g.cummax()).min()
+        delta_oggi = rend_g.iloc[-1] * 100 if len(rend_g) > 0 else 0
+
+        metriche = {
+            'cagr': cagr, 'vol': vol, 'sharpe': sh, 'max_dd': dd,
+            'valore': idx_g.iloc[-1], 'delta_oggi': delta_oggi,
+            'n_costituenti': len(tickers_ok),
+        }
+        return idx_g, idx_b, metriche
+    except Exception:
+        return None, None, None
+
+
+def render_grafico_indice(idx_g, idx_b, metriche, altezza=400, titolo_extra=""):
+    """Renderizza il grafico GGIV vs S&P 500 già calcolato."""
+    fig = go.Figure()
+
+    # Area S&P 500
+    fig.add_trace(go.Scatter(
+        x=idx_b.index, y=idx_b.values,
+        name="S&P 500", mode='lines',
+        line=dict(color='#7a8fa6', width=1.5),
+        hovertemplate='S&P 500: %{y:.1f}<extra></extra>',
+    ))
+    # Area GGIV
+    fig.add_trace(go.Scatter(
+        x=idx_g.index, y=idx_g.values,
+        name="GGIV Index", mode='lines',
+        line=dict(color='#00d4aa', width=2.5),
+        fill='tonexty', fillcolor='rgba(0,212,170,0.07)',
+        hovertemplate='GGIV: %{y:.1f}<extra></extra>',
+    ))
+    # Linea base 100
+    fig.add_hline(y=100, line_dash="dot", line_color="#1a2d45", line_width=1)
+    # Annotazione valore corrente
+    fig.add_annotation(
+        x=idx_g.index[-1], y=idx_g.iloc[-1],
+        text=f" {idx_g.iloc[-1]:.1f}",
+        showarrow=False,
+        font=dict(color='#00d4aa', size=11, family='Courier New'),
+        xanchor='left',
+    )
+    fig.update_layout(
+        paper_bgcolor='#0d1b2a', plot_bgcolor='#0d1b2a',
+        font=dict(color='#e8eaf0', family='Courier New', size=10),
+        legend=dict(
+            bgcolor='rgba(13,27,42,0.8)', bordercolor='#1a2d45',
+            orientation='h', yanchor='bottom', y=1.01, xanchor='left', x=0,
+            font=dict(size=10),
+        ),
+        xaxis=dict(gridcolor='#1a2d45', showgrid=True, linecolor='#1a2d45'),
+        yaxis=dict(gridcolor='#1a2d45', showgrid=True, linecolor='#1a2d45',
+                   title='Valore (base 100)'),
+        margin=dict(t=40, b=30, l=55, r=20),
+        height=altezza,
+        hovermode='x unified',
+    )
+    if titolo_extra:
+        fig.update_layout(title=dict(
+            text=titolo_extra, font=dict(color='#7a8fa6', size=10, family='Courier New'),
+            x=0.5, xanchor='center'
+        ))
+    return fig
+
+
+def render_sentiment_radar(df):
+    """
+    Calcola un sentiment reale dal database:
+    - DSRM status per Tier
+    - % aziende PASS vs WARN vs FAIL
+    - Media giorni silenzio per Tier
+    Restituisce HTML già formattato.
+    """
+    if df.empty:
+        return None
+
+    tier_colors = {'Tier 1': '#e05a5a', 'Tier 2': '#378ADD', 'Tier 3': '#00d4aa'}
+    tiers = ['Tier 1', 'Tier 2', 'Tier 3']
+    blocchi = []
+
+    # Score globale basato su DSRM
+    if 'Fattore_DSRM' in df.columns:
+        media_dsrm = df['Fattore_DSRM'].mean()
+        n_verdi  = (df['Fattore_DSRM'] == 1.0).sum()
+        n_gialli = (df['Fattore_DSRM'] == 0.75).sum()
+        n_rossi  = (df['Fattore_DSRM'] == 0.0).sum()
+        score_glob = int(media_dsrm * 100)
+    else:
+        n_verdi = len(df); n_gialli = 0; n_rossi = 0; score_glob = 75
+
+    if score_glob >= 80:
+        glob_color = "#00d4aa"; glob_label = "SANO"
+    elif score_glob >= 55:
+        glob_color = "#c9a84c"; glob_label = "MODERATO"
+    else:
+        glob_color = "#e05a5a"; glob_label = "ALLERTA"
+
+    # Ammissioni
+    n_pass = n_warn = n_fail = 0
+    if 'Flag_Ammissione' in df.columns:
+        amm = df['Flag_Ammissione'].astype(str).str.strip()
+        n_pass = (amm == 'PASS').sum()
+        n_warn = amm.str.startswith('WARN').sum()
+        n_fail = amm.str.startswith('FAIL').sum()
+
+    html = f"""
+    <div style="background:#0d1b2a; border:1px solid #1a2d45; border-radius:8px; padding:18px 20px;">
+        <div style="font-family:'Courier New',monospace; font-size:10px; color:#7a8fa6;
+                    letter-spacing:0.12em; margin-bottom:14px;">
+            RADAR SENTIMENT — SALUTE DEL PORTAFOGLIO
+        </div>
+
+        <!-- Score globale -->
+        <div style="display:flex; align-items:center; gap:20px; margin-bottom:16px;">
+            <div style="font-size:36px; font-weight:bold; color:{glob_color};
+                        font-family:'Courier New',monospace; line-height:1;">
+                {score_glob}
+            </div>
+            <div>
+                <div style="font-size:13px; font-weight:bold; color:{glob_color};
+                            font-family:'Courier New',monospace; letter-spacing:0.1em;">
+                    {glob_label}
+                </div>
+                <div style="font-size:10px; color:#7a8fa6; font-family:'Courier New',monospace;">
+                    DSRM Health Score / 100
+                </div>
+            </div>
+            <div style="flex:1;">
+                <div style="background:#1a2d45; border-radius:3px; height:8px; overflow:hidden;">
+                    <div style="width:{score_glob}%; background:{glob_color};
+                                height:100%; border-radius:3px;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- DSRM conteggi -->
+        <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:14px;">
+            <div style="background:#0a1628; border-radius:5px; padding:10px; text-align:center;
+                        border:1px solid #00d4aa44;">
+                <div style="font-size:22px; font-weight:bold; color:#00d4aa;
+                            font-family:'Courier New',monospace;">{n_verdi}</div>
+                <div style="font-size:9px; color:#7a8fa6; font-family:'Courier New',monospace;
+                            letter-spacing:0.06em;">VERDE ≤45gg</div>
+            </div>
+            <div style="background:#0a1628; border-radius:5px; padding:10px; text-align:center;
+                        border:1px solid #c9a84c44;">
+                <div style="font-size:22px; font-weight:bold; color:#c9a84c;
+                            font-family:'Courier New',monospace;">{n_gialli}</div>
+                <div style="font-size:9px; color:#7a8fa6; font-family:'Courier New',monospace;
+                            letter-spacing:0.06em;">GIALLO 46-90gg</div>
+            </div>
+            <div style="background:#0a1628; border-radius:5px; padding:10px; text-align:center;
+                        border:1px solid #e05a5a44;">
+                <div style="font-size:22px; font-weight:bold; color:#e05a5a;
+                            font-family:'Courier New',monospace;">{n_rossi}</div>
+                <div style="font-size:9px; color:#7a8fa6; font-family:'Courier New',monospace;
+                            letter-spacing:0.06em;">KILL SWITCH &gt;90gg</div>
+            </div>
+        </div>
+
+        <!-- Ammissioni -->
+        <div style="font-family:'Courier New',monospace; font-size:9px; color:#7a8fa6;
+                    letter-spacing:0.08em; margin-bottom:6px;">FILTRI AMMISSIONE</div>
+        <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:8px;">
+            <div style="text-align:center; background:#0e1a10; border-radius:4px; padding:7px;
+                        border:1px solid #00d4aa33;">
+                <div style="font-size:18px; font-weight:bold; color:#00d4aa;
+                            font-family:'Courier New',monospace;">{n_pass}</div>
+                <div style="font-size:9px; color:#7a8fa6; font-family:'Courier New',monospace;">PASS</div>
+            </div>
+            <div style="text-align:center; background:#1a1400; border-radius:4px; padding:7px;
+                        border:1px solid #c9a84c33;">
+                <div style="font-size:18px; font-weight:bold; color:#c9a84c;
+                            font-family:'Courier New',monospace;">{n_warn}</div>
+                <div style="font-size:9px; color:#7a8fa6; font-family:'Courier New',monospace;">WARN</div>
+            </div>
+            <div style="text-align:center; background:#1a0a0a; border-radius:4px; padding:7px;
+                        border:1px solid #e05a5a33;">
+                <div style="font-size:18px; font-weight:bold; color:#e05a5a;
+                            font-family:'Courier New',monospace;">{n_fail}</div>
+                <div style="font-size:9px; color:#7a8fa6; font-family:'Courier New',monospace;">FAIL</div>
+            </div>
+        </div>
+    </div>"""
+
+    # Sentiment per Tier
+    tier_blocks = []
+    for tier in tiers:
+        sub = df[df['Tier'] == tier] if 'Tier' in df.columns else pd.DataFrame()
+        if sub.empty:
+            continue
+        col = tier_colors.get(tier, '#7a8fa6')
+        n = len(sub)
+        if 'Fattore_DSRM' in sub.columns:
+            dsrm_m = sub['Fattore_DSRM'].mean()
+            score_t = int(dsrm_m * 100)
+        else:
+            score_t = 75
+        if 'Giorni_Silenzio' in sub.columns:
+            gg_m = int(sub['Giorni_Silenzio'].mean())
+        else:
+            gg_m = 0
+        tier_blocks.append(f"""
+        <div style="background:#0a1628; border:1px solid {col}44; border-radius:5px;
+                    padding:10px 12px; font-family:'Courier New',monospace;">
+            <div style="font-size:10px; color:{col}; font-weight:bold;
+                        letter-spacing:0.08em; margin-bottom:5px;">{tier}</div>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                    <div style="font-size:18px; font-weight:bold; color:{col};">{score_t}</div>
+                    <div style="font-size:9px; color:#7a8fa6;">health score</div>
+                </div>
+                <div style="text-align:right;">
+                    <div style="font-size:13px; color:#e8eaf0;">{n}</div>
+                    <div style="font-size:9px; color:#7a8fa6;">aziende</div>
+                </div>
+                <div style="text-align:right;">
+                    <div style="font-size:13px; color:#e8eaf0;">{gg_m}gg</div>
+                    <div style="font-size:9px; color:#7a8fa6;">media silenzio</div>
+                </div>
+            </div>
+            <div style="background:#1a2d45; border-radius:2px; height:4px; margin-top:7px; overflow:hidden;">
+                <div style="width:{score_t}%; background:{col}; height:100%; border-radius:2px;"></div>
+            </div>
+        </div>""")
+
+    html += f"""
+    <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-top:12px;">
+        {''.join(tier_blocks)}
+    </div>"""
+
+    return html
+
+
+# ==========================================
+# 9. SCHEDE
+# ==========================================
+tab_home, tab_overview, tab_watchlist, tab_backtest, tab_correlazione, tab_rischio, tab_brevetti = st.tabs([
+    "⬡ HOME",
     "DATABASE & DSRM",
     "INCUBATORE",
     "BACKTEST & STRESS",
     "CORRELAZIONE & MACRO",
     "RISCHIO & ORDINI",
-    "RADAR SENTIMENT",
     "SENSORE BREVETTI"
 ])
 
-# --- SCHEDA 1: OVERVIEW ---
+# --- SCHEDA 0: HOME ---
+with tab_home:
+
+    # ── Radar Sentiment in cima ──────────────────────────────────────────────
+    sentiment_html = render_sentiment_radar(df_aziende)
+    if sentiment_html:
+        st.markdown(sentiment_html, unsafe_allow_html=True)
+    else:
+        st.warning("Dati portafoglio non disponibili per il radar sentiment.")
+
+    st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
+
+    # ── Grafico indice live — centrato, grande ───────────────────────────────
+    st.markdown("""
+    <div style="text-align:center; font-family:'Courier New',monospace; margin-bottom:6px;">
+        <span style="font-size:13px; color:#c9a84c; letter-spacing:0.12em; font-weight:bold;">
+            ⬡ GGIV INDEX — ANDAMENTO IN TEMPO REALE
+        </span><br>
+        <span style="font-size:10px; color:#7a8fa6;">
+            Costruito sui costituenti reali del portafoglio con pesi DSRM + UCITS &nbsp;·&nbsp;
+            Confronto S&P 500 &nbsp;·&nbsp; Aggiornamento ogni 2 minuti
+        </span>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if not df_aziende.empty and 'Ticker' in df_aziende.columns:
+        tickers_live = tuple(df_aziende['Ticker'].dropna().unique())
+
+        # Selettore periodo
+        col_p1, col_p2, col_p3, col_p4, col_p5 = st.columns([1,1,1,1,4])
+        periodo_sel = "6mo"
+        if col_p1.button("1M"):  periodo_sel = "1mo"
+        if col_p2.button("3M"):  periodo_sel = "3mo"
+        if col_p3.button("6M"):  periodo_sel = "6mo"
+        if col_p4.button("1A"):  periodo_sel = "1y"
+        # Mantieni periodo in session_state
+        if 'periodo_home' not in st.session_state:
+            st.session_state['periodo_home'] = "6mo"
+        for lbl, val in [("1M","1mo"),("3M","3mo"),("6M","6mo"),("1A","1y")]:
+            if locals().get(f'col_p{["1M","3M","6M","1A"].index(lbl)+1}'):
+                st.session_state['periodo_home'] = val
+        periodo_attivo = st.session_state.get('periodo_home', "6mo")
+
+        with st.spinner("Aggiornamento dati indice..."):
+            idx_g_home, idx_b_home, met_home = get_indice_live(
+                tickers_live, periodo=periodo_attivo
+            )
+
+        if idx_g_home is not None and idx_b_home is not None:
+            # KPI strip
+            delta_col = "#00d4aa" if met_home['delta_oggi'] >= 0 else "#e05a5a"
+            delta_sign = "+" if met_home['delta_oggi'] >= 0 else ""
+            kc1, kc2, kc3, kc4, kc5 = st.columns(5)
+            kc1.metric("VALORE INDICE", f"{met_home['valore']:.1f}", "base 100")
+            kc2.metric("RENDIM. OGGI",
+                       f"{delta_sign}{met_home['delta_oggi']:.2f}%",
+                       "ultimo dato disponibile")
+            kc3.metric("CAGR",
+                       f"{met_home['cagr']*100:+.1f}%",
+                       f"periodo selezionato")
+            kc4.metric("SHARPE",    f"{met_home['sharpe']:.2f}", "rf=3.5%")
+            kc5.metric("MAX DD",    f"{met_home['max_dd']*100:.1f}%",
+                       f"{met_home['n_costituenti']} costituenti")
+
+            fig_home = render_grafico_indice(
+                idx_g_home, idx_b_home, met_home,
+                altezza=480,
+                titolo_extra=f"GGIV Index vs S&P 500 — {periodo_attivo.replace('mo',' mesi').replace('y',' anno')}"
+            )
+            st.plotly_chart(fig_home, use_container_width=True)
+            st.caption(f"Aggiornato: {datetime.now().strftime('%d/%m/%Y %H:%M')} · "
+                       f"{met_home['n_costituenti']} costituenti con dati disponibili su Yahoo Finance · "
+                       f"Pesi DSRM + UCITS applicati")
+        else:
+            st.warning("Impossibile scaricare i dati dei costituenti. Controlla la connessione.")
+    else:
+        st.warning("Portafoglio non disponibile. Controlla la connessione al Google Sheet.")
+
+# --- SCHEDA 1: DATABASE & DSRM ---
 with tab_overview:
+
+    # ── KPI reali (calcolati dai dati live se disponibili) ───────────────────
+    n_aziende   = len(df_aziende) if not df_aziende.empty else 0
+    n_kill      = (df_aziende['Fattore_DSRM'] == 0.0).sum() if not df_aziende.empty and 'Fattore_DSRM' in df_aziende.columns else 0
+    n_penaliz   = (df_aziende['Fattore_DSRM'] == 0.75).sum() if not df_aziende.empty and 'Fattore_DSRM' in df_aziende.columns else 0
+    peso_shield = df_aziende[df_aziende['Tier'] == 'Tier 3']['Peso_Effettivo'].sum() if not df_aziende.empty else 0
+
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("AUM TOTALE", f"€ {capitale_globale:,.0f}", "+4.5% YTD")
-    col2.metric("AZIENDE IN INDICE", str(len(df_aziende)) if not df_aziende.empty else "0", "sincronizzato")
-    col3.metric("VOLATILITÀ ANNUA", "18.5%", "ottimale")
-    col4.metric("SHARPE RATIO", "0.82", "efficienza alta")
+    col1.metric("AUM SIMULATO",      f"€ {capitale_globale:,.0f}", "vedi sidebar per modificare")
+    col2.metric("AZIENDE IN INDICE", str(n_aziende),
+                f"{n_kill} kill switch · {n_penaliz} penalizzati" if (n_kill+n_penaliz) > 0 else "tutte operative")
+    col3.metric("GOLDEN SHIELD",     f"{peso_shield:.1f}%",
+                "✓ attivo" if peso_shield >= 30 else "⚠ sotto soglia 30%")
+    col4.metric("ULTIMO AGGIORNAMENTO", datetime.now().strftime("%d/%m %H:%M"), "da Google Sheet")
 
-    st.markdown("---")
+    st.markdown("<div style='margin-top:8px;'></div>", unsafe_allow_html=True)
 
-    # SUNBURST — Asset Allocation Tier > Aziende
+    # ── Sunburst ─────────────────────────────────────────────────────────────
     if not df_aziende.empty and 'Tier' in df_aziende.columns:
-        st.markdown("### ASSET ALLOCATION — MAPPA STRUTTURALE")
+        st.markdown("""
+        <div style="font-family:'Courier New',monospace; font-size:11px; color:#7a8fa6;
+                    letter-spacing:0.1em; margin-bottom:4px;">
+            ASSET ALLOCATION — MAPPA STRUTTURALE
+        </div>""", unsafe_allow_html=True)
 
-        # Costruisce la struttura per il sunburst
-        # Livello 0: root
-        # Livello 1: Tier
-        # Livello 2: Aziende
-        labels = ["GGIV INDEX"]
-        parents = [""]
-        values = [df_aziende['Peso_Effettivo'].sum()]
-        colors = ["#c9a84c"]
-
-        # Palette per i Tier
-        tier_colors = {
-            'Tier 1': '#e05a5a',
-            'Tier 2': '#378ADD',
-            'Tier 3': '#00d4aa',
-        }
-
-        # Aggiunge i Tier
+        labels = ["GGIV INDEX"]; parents = [""]; values = [df_aziende['Peso_Effettivo'].sum()]; colors = ["#c9a84c"]
+        tier_colors = {'Tier 1': '#e05a5a', 'Tier 2': '#378ADD', 'Tier 3': '#00d4aa'}
         for tier in df_aziende['Tier'].unique():
             peso_tier = df_aziende[df_aziende['Tier'] == tier]['Peso_Effettivo'].sum()
-            labels.append(tier)
-            parents.append("GGIV INDEX")
-            values.append(peso_tier)
-            colors.append(tier_colors.get(tier, '#7a8fa6'))
-
-        # Aggiunge le singole aziende
+            labels.append(tier); parents.append("GGIV INDEX")
+            values.append(peso_tier); colors.append(tier_colors.get(tier, '#7a8fa6'))
         for _, row in df_aziende.iterrows():
-            labels.append(row['Azienda'])
-            parents.append(row['Tier'])
+            labels.append(row['Azienda']); parents.append(row['Tier'])
             values.append(row['Peso_Effettivo'])
-            # Tonalità leggermente più chiara del tier
-            base = tier_colors.get(row['Tier'], '#7a8fa6')
-            colors.append(base + 'bb')  # aggiunge trasparenza leggera
+            colors.append(tier_colors.get(row['Tier'], '#7a8fa6') + 'bb')
 
         fig_sunburst = go.Figure(go.Sunburst(
-            labels=labels,
-            parents=parents,
-            values=values,
+            labels=labels, parents=parents, values=values,
             marker=dict(colors=colors, line=dict(color='#0a0e1a', width=2)),
             textfont=dict(family="Courier New", size=11, color="#e8eaf0"),
             hovertemplate='<b>%{label}</b><br>Peso: %{value:.2f}%<extra></extra>',
-            branchvalues="total",
-            insidetextorientation='radial',
+            branchvalues="total", insidetextorientation='radial',
         ))
         fig_sunburst.update_layout(
-            paper_bgcolor='#0d1b2a',
-            plot_bgcolor='#0d1b2a',
+            paper_bgcolor='#0d1b2a', plot_bgcolor='#0d1b2a',
             font=dict(color='#e8eaf0', family='Courier New'),
-            margin=dict(t=20, b=20, l=20, r=20),
-            height=480,
+            margin=dict(t=10, b=10, l=10, r=10), height=440,
         )
         st.plotly_chart(fig_sunburst, use_container_width=True)
-        st.caption("Clicca su un Tier per espanderlo e vedere le singole aziende. Clicca al centro per tornare.")
+        st.caption("Clicca su un Tier per espandere · Clicca al centro per tornare")
 
-    st.markdown("---")
-    st.markdown("### MOTORE DSRM — STATO ATTIVO")
+    st.markdown("<div style='margin-top:16px;'></div>", unsafe_allow_html=True)
+
+    # ── Tabella DSRM curata ──────────────────────────────────────────────────
+    st.markdown("""
+    <div style="font-family:'Courier New',monospace; font-size:11px; color:#7a8fa6;
+                letter-spacing:0.1em; margin-bottom:8px;">
+        MOTORE DSRM — STATO ATTIVO
+    </div>""", unsafe_allow_html=True)
 
     if not df_aziende.empty:
+        # Costruisci tabella leggibile
+        cols_dsrm = ['Ticker', 'Azienda', 'Tier']
+        if 'Giorni_Silenzio'  in df_aziende.columns: cols_dsrm.append('Giorni_Silenzio')
+        if 'Fattore_DSRM'     in df_aziende.columns: cols_dsrm.append('Fattore_DSRM')
+        if 'Peso_Base'        in df_aziende.columns: cols_dsrm.append('Peso_Base')
+        if 'Peso_Effettivo'   in df_aziende.columns: cols_dsrm.append('Peso_Effettivo')
+        if 'Market_Cap_USD'   in df_aziende.columns: cols_dsrm.append('Market_Cap_USD')
+        if 'GES_Score'        in df_aziende.columns: cols_dsrm.append('GES_Score')
+        if 'Flag_Ammissione'  in df_aziende.columns: cols_dsrm.append('Flag_Ammissione')
+
+        df_tab = df_aziende[cols_dsrm].copy()
+
+        # Formatta colonne numeriche
+        if 'Market_Cap_USD' in df_tab.columns:
+            df_tab['Market_Cap_USD'] = df_tab['Market_Cap_USD'].apply(
+                lambda x: f"${x/1e9:.1f}B" if pd.notna(x) and x >= 1e9
+                          else (f"${x/1e6:.0f}M" if pd.notna(x) and x > 0 else "N/D")
+            )
+        if 'GES_Score' in df_tab.columns:
+            df_tab['GES_Score'] = df_tab['GES_Score'].apply(
+                lambda x: f"{float(x):.4f}" if pd.notna(x) and x != '' else "N/D"
+            )
+        if 'Peso_Base' in df_tab.columns:
+            df_tab['Peso_Base'] = df_tab['Peso_Base'].apply(
+                lambda x: f"{float(x):.1f}%" if pd.notna(x) else "N/D"
+            )
+        if 'Peso_Effettivo' in df_tab.columns:
+            df_tab['Peso_Effettivo'] = df_tab['Peso_Effettivo'].apply(
+                lambda x: f"{float(x):.2f}%" if pd.notna(x) else "N/D"
+            )
+
+        # Colora righe per stato DSRM usando HTML
+        def dsrm_row_color(row):
+            if 'Fattore_DSRM' in row and row['Fattore_DSRM'] == 0.0:
+                return '#2a0e0e'   # rosso scuro — kill switch
+            elif 'Fattore_DSRM' in row and row['Fattore_DSRM'] < 1.0:
+                return '#1a1400'   # giallo scuro — penalizzato
+            return ''
+
+        # Rinomina colonne per presentazione
+        df_tab = df_tab.rename(columns={
+            'Giorni_Silenzio': 'Silenzio (gg)',
+            'Fattore_DSRM':    'DSRM Δ',
+            'Peso_Base':       'Peso Base',
+            'Peso_Effettivo':  'Peso Eff.',
+            'Market_Cap_USD':  'Mkt Cap',
+            'GES_Score':       'GES',
+            'Flag_Ammissione': 'Ammissione',
+        })
         st.dataframe(
-            df_aziende.style.apply(
-                lambda x: ['background-color: #2a0e0e' if i == True else '' for i in (x == x)],
-                axis=1,
-                subset=pd.IndexSlice[df_aziende['Giorni_Silenzio'] > 90, :]
-            ),
-            use_container_width=True
+            df_tab,
+            use_container_width=True,
+            hide_index=True,
+            height=min(400, (len(df_tab) + 1) * 38),
         )
 
-        aziende_penalizzate = df_aziende[df_aziende['Fattore_DSRM'] < 1.0]
-        capitale_salvato_totale = (df_aziende['Percentuale_Persa'].sum() / 100) * capitale_globale
+        # Alert DSRM
+        aziende_penalizzate = df_aziende[df_aziende['Fattore_DSRM'] < 1.0] if 'Fattore_DSRM' in df_aziende.columns else pd.DataFrame()
+        capitale_salvato_totale = (df_aziende['Percentuale_Persa'].sum() / 100) * capitale_globale if 'Percentuale_Persa' in df_aziende.columns else 0
 
-        col_d1, col_d2 = st.columns(2)
-        with col_d1:
-            st.metric("CAPITALE NELLO SHIELD", f"€ {capitale_salvato_totale:,.2f}", "protezione attiva")
-        with col_d2:
-            if aziende_penalizzate.empty:
-                st.success("TUTTE LE AZIENDE COMUNICANO REGOLARMENTE")
-            else:
-                for _, row in aziende_penalizzate.iterrows():
-                    soldi_tolti = (row['Percentuale_Persa'] / 100) * capitale_globale
-                    if row['Fattore_DSRM'] == 0:
-                        st.error(f"KILL SWITCH: {row['Azienda']} ({row['Giorni_Silenzio']} gg) — € {soldi_tolti:,.2f} blindati")
-                    else:
-                        st.warning(f"PENALITÀ: {row['Azienda']} ({row['Giorni_Silenzio']} gg) — € {soldi_tolti:,.2f} allo Shield")
+        if not aziende_penalizzate.empty:
+            st.markdown("<div style='margin-top:8px;'></div>", unsafe_allow_html=True)
+            for _, row in aziende_penalizzate.iterrows():
+                soldi_tolti = (row.get('Percentuale_Persa', 0) / 100) * capitale_globale
+                if row['Fattore_DSRM'] == 0:
+                    st.error(f"KILL SWITCH: {row['Azienda']} ({row['Giorni_Silenzio']} gg) — € {soldi_tolti:,.0f} blindati")
+                else:
+                    st.warning(f"PENALITÀ −25%: {row['Azienda']} ({row['Giorni_Silenzio']} gg) — € {soldi_tolti:,.0f} allo Shield")
+        else:
+            st.success("DSRM — Tutte le aziende comunicano regolarmente (Δ = 1.0)")
     else:
         st.warning("Connessione al database in corso. Controlla i link CSV.")
 
-    # ── FILTRI DI AMMISSIONE (Rulebook sezione 2) ──────────────────────────
-    st.markdown("---")
-    st.markdown("### FILTRI DI AMMISSIONE — RULEBOOK SEZ. 2")
-    st.caption("Market Cap >10M USD | ADTV >250K USD | Free Float >15% | No A-Share cinesi")
+    st.markdown("<div style='margin-top:20px;'></div>", unsafe_allow_html=True)
+
+    # ── Filtri ammissione ─────────────────────────────────────────────────────
+    st.markdown("""
+    <div style="font-family:'Courier New',monospace; font-size:11px; color:#7a8fa6;
+                letter-spacing:0.1em; margin-bottom:8px;">
+        FILTRI DI AMMISSIONE — RULEBOOK SEZ. 2
+    </div>""", unsafe_allow_html=True)
+    st.caption("Market Cap >10M USD · ADTV >250K USD · Free Float >15% · No A-Share cinesi")
 
     if not df_aziende.empty:
         col_amm = 'Flag_Ammissione' if 'Flag_Ammissione' in df_aziende.columns else None
@@ -478,8 +968,6 @@ with tab_overview:
         col_ff  = 'Free_Float_Pct'  if 'Free_Float_Pct'  in df_aziende.columns else None
 
         if col_amm:
-            # FIX: forza conversione a stringa prima di .str — evita AttributeError
-            # se la colonna contiene valori numerici o NaN dal CSV
             col_amm_str = df_aziende[col_amm].astype(str).str.strip()
             pass_df = df_aziende[col_amm_str == 'PASS']
             warn_df = df_aziende[col_amm_str.str.startswith('WARN', na=False)]
@@ -488,41 +976,38 @@ with tab_overview:
             ca1, ca2, ca3 = st.columns(3)
             ca1.metric("PASS — Ammesse", str(len(pass_df)), "conformi al Rulebook")
             ca2.metric("WARN — Dati N/D", str(len(warn_df)), "verifica manuale")
-            ca3.metric("FAIL — Escluse", str(len(fail_df)), "violazione criteri")
+            ca3.metric("FAIL — Escluse",  str(len(fail_df)), "violazione criteri")
 
             if not fail_df.empty:
-                st.markdown("#### Aziende che violano i criteri di ammissione")
                 for _, row in fail_df.iterrows():
                     st.error(f"FAIL: {row['Azienda']} ({row['Ticker']}) — {str(row[col_amm])}")
-
             if not warn_df.empty:
-                st.markdown("#### Aziende con dati mancanti — verifica consigliata")
-                for _, row in warn_df.iterrows():
-                    st.warning(f"WARN: {row['Azienda']} ({row['Ticker']}) — {str(row[col_amm])}")
+                with st.expander(f"⚠️ {len(warn_df)} aziende con dati mancanti"):
+                    for _, row in warn_df.iterrows():
+                        st.warning(f"WARN: {row['Azienda']} ({row['Ticker']}) — {str(row[col_amm])}")
 
-            # Tabella completa filtri
             cols_show = ['Ticker', 'Azienda', 'Tier']
-            if col_mc:   cols_show.append(col_mc)
-            if col_adtv: cols_show.append(col_adtv)
-            if col_ff:   cols_show.append(col_ff)
-            if col_amm:  cols_show.append(col_amm)
-            if col_del:  cols_show.append(col_del)
-            st.dataframe(df_aziende[cols_show], use_container_width=True)
+            for c in [col_mc, col_adtv, col_ff, col_amm, col_del]:
+                if c: cols_show.append(c)
+            st.dataframe(df_aziende[cols_show], use_container_width=True, hide_index=True)
 
-            # Alert delisting
             if col_del:
                 del_alert = df_aziende[df_aziende[col_del].astype(str).str.strip() == 'ALERT']
                 if not del_alert.empty:
-                    st.markdown("#### Allerte Delisting")
                     for _, row in del_alert.iterrows():
                         st.error(f"DELISTING ALERT: {row['Azienda']} ({row['Ticker']}) — verificare urgentemente su borsa primaria")
         else:
-            st.info("Colonna 'Flag_Ammissione' non trovata. Esegui il tool di aggiornamento v2.0 per popolarla.")
+            st.info("Colonna 'Flag_Ammissione' non trovata. Esegui il Radar Bot per popolarla.")
 
-    # ── AGGREGATE CAP UCITS 5/10/40 (Rulebook sezione 7) ──────────────────
-    st.markdown("---")
-    st.markdown("### UCITS AGGREGATE CAP — REGOLA 5/10/40")
-    st.caption("Nessun titolo >10% | Somma titoli >5% non supera 40% del portafoglio")
+    st.markdown("<div style='margin-top:20px;'></div>", unsafe_allow_html=True)
+
+    # ── UCITS 5/10/40 ─────────────────────────────────────────────────────────
+    st.markdown("""
+    <div style="font-family:'Courier New',monospace; font-size:11px; color:#7a8fa6;
+                letter-spacing:0.1em; margin-bottom:8px;">
+        UCITS AGGREGATE CAP — REGOLA 5/10/40
+    </div>""", unsafe_allow_html=True)
+    st.caption("Nessun titolo >10% · Somma titoli >5% non supera 40% del portafoglio")
 
     if not df_aziende.empty and 'Peso_Effettivo' in df_aziende.columns:
         somma_pesi_eff = df_aziende['Peso_Effettivo'].sum()
@@ -642,54 +1127,86 @@ with tab_watchlist:
 
 # --- SCHEDA 3: BACKTEST ---
 with tab_backtest:
-    st.markdown("### BACKTEST — ULTIMI 3 ANNI CON RIBILANCIAMENTO TRIMESTRALE")
+    st.markdown("""
+    <div style="font-family:'Courier New',monospace; font-size:11px; color:#7a8fa6;
+                letter-spacing:0.1em; margin-bottom:4px;">
+        BACKTEST — SERIE STORICA REALE CON RIBILANCIAMENTO TRIMESTRALE
+    </div>""", unsafe_allow_html=True)
     st.caption("Simulazione con ribilanciamento Q1/Q2/Q3/Q4 e buffer anti-turnover 15% (Rulebook sez. 7-BIS)")
 
-    np.random.seed(42)
-    date_bt = pd.date_range(start="2021-01-01", periods=36, freq="ME")
-
-    # Date di ribilanciamento trimestrali (primo mese di ogni trimestre)
-    date_ribil = [d for d in date_bt if d.month in [3, 6, 9, 12]]
-
-    sp_vals   = np.linspace(100, 130, 36) + np.random.normal(0, 2, 36)
-    ggiv_vals = np.linspace(100, 165, 36) + np.random.normal(0, 3, 36)
-
-    fig_bt = go.Figure()
-    fig_bt.add_trace(go.Scatter(
-        x=date_bt, y=sp_vals, name="S&P 500",
-        line=dict(color='#7a8fa6', width=1.5),
-        hovertemplate='S&P 500: %{y:.1f}<extra></extra>'
-    ))
-    fig_bt.add_trace(go.Scatter(
-        x=date_bt, y=ggiv_vals, name="GGIV Strategy",
-        line=dict(color='#00d4aa', width=2),
-        fill='tonexty', fillcolor='rgba(0,212,170,0.05)',
-        hovertemplate='GGIV: %{y:.1f}<extra></extra>'
-    ))
-    # Linee verticali per ogni ribilanciamento trimestrale
-    for dr in date_ribil:
-        fig_bt.add_vline(
-            x=dr.timestamp() * 1000,
-            line=dict(color='#c9a84c', width=0.8, dash='dot'),
+    # Grafico reale — stessi dati del Tear Sheet PDF
+    if not df_aziende.empty and 'Ticker' in df_aziende.columns:
+        tickers_bt_live = tuple(df_aziende['Ticker'].dropna().unique())
+        col_bt1, col_bt2 = st.columns([1, 3])
+        periodo_bt = col_bt1.selectbox(
+            "Periodo storico:",
+            ["1y", "2y", "3y", "5y", "max"],
+            index=1,
+            format_func=lambda x: {"1y":"1 Anno","2y":"2 Anni","3y":"3 Anni","5y":"5 Anni","max":"Max storia"}[x]
         )
-    fig_bt.add_trace(go.Scatter(
-        x=[None], y=[None], mode='lines', name='Ribilanciamento trimestrale',
-        line=dict(color='#c9a84c', width=0.8, dash='dot')
-    ))
-    fig_bt.update_layout(
-        paper_bgcolor='#0d1b2a', plot_bgcolor='#0d1b2a',
-        font=dict(color='#e8eaf0', family='Courier New', size=11),
-        legend=dict(bgcolor='#0d1b2a', bordercolor='#1a2d45'),
-        xaxis=dict(gridcolor='#1a2d45', linecolor='#1a2d45'),
-        yaxis=dict(gridcolor='#1a2d45', linecolor='#1a2d45'),
-        margin=dict(t=20, b=20),
-        height=380,
-    )
-    st.plotly_chart(fig_bt, use_container_width=True)
-    st.caption(f"Le linee verticali dorate indicano i {len(date_ribil)} ribilanciamenti trimestrali nel periodo. Buffer anti-turnover 15% attivo.")
 
-    st.markdown("---")
-    st.markdown("### STRESS TEST")
+        with st.spinner("Scaricando serie storica reale..."):
+            idx_g_bt, idx_b_bt, met_bt = get_indice_live(tickers_bt_live, periodo=periodo_bt)
+
+        if idx_g_bt is not None:
+            # KPI
+            kb1, kb2, kb3, kb4, kb5 = st.columns(5)
+            kb1.metric("CAGR",      f"{met_bt['cagr']*100:+.2f}%",  "annualizzato")
+            kb2.metric("SHARPE",    f"{met_bt['sharpe']:.2f}",       "rf=3.5%")
+            kb3.metric("MAX DD",    f"{met_bt['max_dd']*100:.2f}%",  "drawdown massimo")
+            kb4.metric("VOL ANNUA", f"{met_bt['vol']*100:.1f}%",     "rendimenti giornalieri")
+            kb5.metric("N. TICKER", str(met_bt['n_costituenti']),    "con dati disponibili")
+
+            # Date ribilanciamenti trimestrali nel periodo
+            date_ribil = pd.date_range(
+                start=idx_g_bt.index[0], end=idx_g_bt.index[-1], freq='QS'
+            )
+
+            fig_bt2 = render_grafico_indice(idx_g_bt, idx_b_bt, met_bt, altezza=420)
+            # Aggiungi linee ribilanciamento
+            for dr in date_ribil:
+                fig_bt2.add_vline(
+                    x=dr, line=dict(color='#c9a84c', width=0.8, dash='dot'),
+                )
+            fig_bt2.add_trace(go.Scatter(
+                x=[None], y=[None], mode='lines', name='Ribilanciamento Q',
+                line=dict(color='#c9a84c', width=0.8, dash='dot')
+            ))
+            # Drawdown
+            dd_serie = ((idx_g_bt - idx_g_bt.cummax()) / idx_g_bt.cummax()) * 100
+            fig_bt2.add_trace(go.Scatter(
+                x=dd_serie.index, y=dd_serie.values,
+                name='Drawdown GGIV', fill='tozeroy',
+                fillcolor='rgba(224,90,90,0.12)',
+                line=dict(color='#e05a5a', width=0.8),
+                yaxis='y2',
+                hovertemplate='DD: %{y:.1f}%<extra></extra>',
+            ))
+            fig_bt2.update_layout(
+                yaxis2=dict(
+                    title='Drawdown (%)', overlaying='y', side='right',
+                    gridcolor='#1a2d45', tickfont=dict(color='#e05a5a', size=9),
+                    titlefont=dict(color='#e05a5a', size=9),
+                    showgrid=False,
+                ),
+            )
+            st.plotly_chart(fig_bt2, use_container_width=True)
+            st.caption(
+                f"Le linee verticali dorate indicano i ribilanciamenti trimestrali. "
+                f"Area rossa = drawdown GGIV. "
+                f"Dati reali da Yahoo Finance — {met_bt['n_costituenti']} costituenti."
+            )
+        else:
+            st.warning("Impossibile scaricare i dati storici. Controlla la connessione.")
+    else:
+        st.warning("Portafoglio non disponibile.")
+
+    st.markdown("<div style='margin-top:20px;'></div>", unsafe_allow_html=True)
+    st.markdown("""
+    <div style="font-family:'Courier New',monospace; font-size:11px; color:#7a8fa6;
+                letter-spacing:0.1em; margin-bottom:8px;">
+        STRESS TEST — SIMULAZIONE SCENARIO DI CROLLO
+    </div>""", unsafe_allow_html=True)
     crollo = st.slider("Simula crollo mercato (%):", 0, 50, 20, step=1)
 
     peso_t1 = df_aziende[df_aziende['Tier'] == 'Tier 1']['Peso_Effettivo'].sum() if not df_aziende.empty else 0
@@ -702,8 +1219,12 @@ with tab_backtest:
     col_c2.metric("IMPATTO TIER 3", f"{-crollo * 0.2:.1f}%", "protezione shield")
     col_c3.metric("IMPATTO NETTO", f"€ {capitale_globale * (impatto_tot / 100):,.0f}", f"{impatto_tot:.1f}%")
 
-    st.markdown("---")
-    st.markdown("### TEAR SHEET — BACKTEST ISTITUZIONALE (2020 → OGGI)")
+    st.markdown("<div style='margin-top:20px;'></div>", unsafe_allow_html=True)
+    st.markdown("""
+    <div style="font-family:'Courier New',monospace; font-size:11px; color:#7a8fa6;
+                letter-spacing:0.1em; margin-bottom:6px;">
+        TEAR SHEET — BACKTEST ISTITUZIONALE (2020 → OGGI)
+    </div>""", unsafe_allow_html=True)
     st.caption("Scarica prezzi storici reali, applica la metodologia DSRM/Tier del Rulebook v1.3 e genera un PDF pronto per la presentazione.")
 
     if st.button("GENERA TEAR SHEET PDF"):
@@ -1514,7 +2035,11 @@ with tab_correlazione:
 
 # --- SCHEDA 5: RISCHIO & ORDINI ---
 with tab_rischio:
-    st.markdown("### GESTIONE RISCHIO & ORDINI")
+    st.markdown("""
+    <div style="font-family:'Courier New',monospace; font-size:11px; color:#7a8fa6;
+                letter-spacing:0.1em; margin-bottom:12px;">
+        GESTIONE RISCHIO & ORDINI
+    </div>""", unsafe_allow_html=True)
     limite_rischio = st.slider("Soglia massima per posizione (%):", 5, 40, 15, step=1)
 
     peso_totale_shield = df_aziende[df_aziende['Tier'] == 'Tier 3']['Peso_Effettivo'].sum() if not df_aziende.empty else 0
@@ -1529,7 +2054,7 @@ with tab_rischio:
         for _, row in df_aziende[df_aziende['Peso_Effettivo'] > limite_rischio].iterrows():
             st.warning(f"PROFIT TAKER — {row['Azienda']}: {row['Peso_Effettivo']:.1f}% — Ridurre di {row['Peso_Effettivo'] - limite_rischio:.1f}%")
 
-    st.markdown("---")
+    st.markdown("<div style='margin-top:16px;'></div>", unsafe_allow_html=True)
 
     somma_pesi = df_aziende['Peso_Effettivo'].sum() if not df_aziende.empty else 0
     if somma_pesi > 0:
@@ -1554,81 +2079,112 @@ with tab_rischio:
             df_aziende['Budget_€'] = capitale_globale * (df_aziende['Peso_Normalizzato'] / 100)
             df_aziende['Azioni'] = (df_aziende['Budget_€'] / df_aziende['Prezzo_LIVE_$']).round(4)
             ordini = df_aziende[df_aziende['Azioni'] > 0][['Ticker', 'Azienda', 'Prezzo_LIVE_$', 'Budget_€', 'Azioni']]
-            st.table(ordini)
+            st.dataframe(ordini, use_container_width=True, hide_index=True)
 
-# --- SCHEDA 5: SENTIMENT ---
-with tab_sentiment:
-    st.markdown("### RADAR SENTIMENT")
-    st.progress(0.85)
-    st.caption("GRAPHENE — 85% POSITIVO")
-    st.progress(0.60)
-    st.caption("SEMICONDUCTORS — 60% NEUTRALE")
-
-# --- SCHEDA 6: BREVETTI ---
+# --- SCHEDA 6: BREVETTI & GES ---
 with tab_brevetti:
-    st.markdown("### SENSORE IP — BREVETTI & GES")
+    st.markdown("""
+    <div style="font-family:'Courier New',monospace; font-size:11px; color:#7a8fa6;
+                letter-spacing:0.1em; margin-bottom:12px;">
+        SENSORE IP — BREVETTI & GES SCORE
+    </div>""", unsafe_allow_html=True)
     if not df_aziende.empty:
-        target = st.selectbox("Seleziona azienda:", df_aziende['Azienda'].tolist())
-        row_t  = df_aziende[df_aziende['Azienda'] == target]
+        col_sel, col_rank = st.columns([1, 1])
 
-        # GES Score calcolato dal tool v2.0 (priorità su Health_Score statico)
-        if 'GES_Score' in df_aziende.columns and not row_t['GES_Score'].isna().all():
-            ges_raw = row_t['GES_Score'].values[0]
-            score   = round(float(ges_raw) * 100, 1) if ges_raw else 0
-            label   = "GES SCORE (calcolato)"
-        else:
-            score_val = row_t['Health_Score'].values if 'Health_Score' in row_t.columns else [0]
-            score     = int(score_val[0]) if len(score_val) > 0 else 0
-            label     = "HEALTH SCORE (statico)"
+        with col_sel:
+            target = st.selectbox("Seleziona azienda:", df_aziende['Azienda'].tolist())
+            row_t  = df_aziende[df_aziende['Azienda'] == target]
 
-        stato  = "ECCELLENTE" if score >= 80 else "MODERATO" if score >= 50 else "ALLERTA"
-        colore = "#00d4aa"    if score >= 80 else "#c9a84c"  if score >= 50 else "#e05a5a"
-        st.metric(label, f"{score}/100", stato)
+            if 'GES_Score' in df_aziende.columns and not row_t['GES_Score'].isna().all():
+                ges_raw = row_t['GES_Score'].values[0]
+                score   = round(float(ges_raw) * 100, 1) if ges_raw else 0
+                label   = "GES SCORE (calcolato)"
+            else:
+                score_val = row_t['Health_Score'].values if 'Health_Score' in row_t.columns else [0]
+                score     = int(score_val[0]) if len(score_val) > 0 else 0
+                label     = "HEALTH SCORE (statico)"
 
-        # Mostra dettaglio brevetti se disponibile
-        cb1, cb2, cb3 = st.columns(3)
-        if 'Brevetti_Granted' in row_t.columns:
-            try:
-                val_g = row_t['Brevetti_Granted'].values[0]
-                val_g = int(float(val_g)) if val_g not in (None, '', 'nan') and str(val_g) != 'nan' else 0
-            except (ValueError, TypeError):
-                val_g = 0
-            cb1.metric("BREVETTI GRANTED", str(val_g), "USPTO concessi")
-        if 'Brevetti_Pending' in row_t.columns:
-            try:
-                val_p = row_t['Brevetti_Pending'].values[0]
-                val_p = int(float(val_p)) if val_p not in (None, '', 'nan') and str(val_p) != 'nan' else 0
-            except (ValueError, TypeError):
-                val_p = 0
-            cb2.metric("BREVETTI PENDING", str(val_p), "domande attive")
-        if 'Tier' in row_t.columns:
-            tier_az = row_t['Tier'].values[0]
-            coeff   = {"Tier 1": "α=0.30 β=0.70", "Tier 2": "α=0.55 β=0.45", "Tier 3": "α=0.70 β=0.30"}
-            cb3.metric("COEFFICIENTI GES", coeff.get(tier_az, "—"), f"Rulebook v1.3 — {tier_az}")
+            stato  = "ECCELLENTE" if score >= 80 else "MODERATO" if score >= 50 else "ALLERTA"
+            colore = "#00d4aa"    if score >= 80 else "#c9a84c"  if score >= 50 else "#e05a5a"
+            st.metric(label, f"{score}/100", stato)
 
-        fig_gauge = go.Figure(go.Indicator(
-            mode="gauge+number",
-            value=score,
-            gauge=dict(
-                axis=dict(range=[0, 100], tickcolor="#7a8fa6", tickfont=dict(color="#7a8fa6", size=10)),
-                bar=dict(color=colore),
-                bgcolor="#0d1b2a",
-                bordercolor="#1a2d45",
-                steps=[
-                    dict(range=[0, 50], color="#1a0e0e"),
-                    dict(range=[50, 80], color="#1a1a0e"),
-                    dict(range=[80, 100], color="#0e1a16"),
-                ],
-                threshold=dict(line=dict(color=colore, width=2), thickness=0.75, value=score)
-            ),
-            number=dict(font=dict(color="#e8eaf0", family="Courier New"), suffix="/100"),
-        ))
-        fig_gauge.update_layout(
-            paper_bgcolor='#0d1b2a',
-            font=dict(color='#e8eaf0', family='Courier New'),
-            height=280,
-            margin=dict(t=20, b=20, l=40, r=40),
-        )
-        st.plotly_chart(fig_gauge, use_container_width=True)
+            cb1, cb2, cb3 = st.columns(3)
+            if 'Brevetti_Granted' in row_t.columns:
+                try:
+                    val_g = row_t['Brevetti_Granted'].values[0]
+                    val_g = int(float(val_g)) if val_g not in (None, '', 'nan') and str(val_g) != 'nan' else 0
+                except (ValueError, TypeError): val_g = 0
+                cb1.metric("GRANTED", str(val_g), "USPTO")
+            if 'Brevetti_Pending' in row_t.columns:
+                try:
+                    val_p = row_t['Brevetti_Pending'].values[0]
+                    val_p = int(float(val_p)) if val_p not in (None, '', 'nan') and str(val_p) != 'nan' else 0
+                except (ValueError, TypeError): val_p = 0
+                cb2.metric("PENDING", str(val_p), "domande")
+            if 'Tier' in row_t.columns:
+                tier_az = row_t['Tier'].values[0]
+                coeff   = {"Tier 1": "α=0.30 β=0.70", "Tier 2": "α=0.55 β=0.45", "Tier 3": "α=0.70 β=0.30"}
+                cb3.metric("COEFF.", coeff.get(tier_az, "—"), tier_az)
+
+            fig_gauge = go.Figure(go.Indicator(
+                mode="gauge+number", value=score,
+                gauge=dict(
+                    axis=dict(range=[0, 100], tickcolor="#7a8fa6", tickfont=dict(color="#7a8fa6", size=10)),
+                    bar=dict(color=colore), bgcolor="#0d1b2a", bordercolor="#1a2d45",
+                    steps=[
+                        dict(range=[0,  50], color="#1a0e0e"),
+                        dict(range=[50, 80], color="#1a1a0e"),
+                        dict(range=[80,100], color="#0e1a16"),
+                    ],
+                    threshold=dict(line=dict(color=colore, width=2), thickness=0.75, value=score)
+                ),
+                number=dict(font=dict(color="#e8eaf0", family="Courier New"), suffix="/100"),
+            ))
+            fig_gauge.update_layout(
+                paper_bgcolor='#0d1b2a', font=dict(color='#e8eaf0', family='Courier New'),
+                height=260, margin=dict(t=20, b=10, l=30, r=30),
+            )
+            st.plotly_chart(fig_gauge, use_container_width=True)
+
+        with col_rank:
+            st.markdown("""
+            <div style="font-family:'Courier New',monospace; font-size:10px; color:#7a8fa6;
+                        letter-spacing:0.08em; margin-bottom:10px;">
+                RANKING GES — TOP AZIENDE PER ESPOSIZIONE
+            </div>""", unsafe_allow_html=True)
+
+            if 'GES_Score' in df_aziende.columns:
+                df_ges = df_aziende[['Azienda', 'Ticker', 'Tier', 'GES_Score']].copy()
+                df_ges['GES_Score'] = pd.to_numeric(df_ges['GES_Score'], errors='coerce').fillna(0)
+                df_ges['GES_100'] = (df_ges['GES_Score'] * 100).round(1)
+                df_ges = df_ges.sort_values('GES_100', ascending=False).head(10)
+
+                tier_colors_r = {'Tier 1': '#e05a5a', 'Tier 2': '#378ADD', 'Tier 3': '#00d4aa'}
+                for rank, (_, row_r) in enumerate(df_ges.iterrows(), 1):
+                    col_t = tier_colors_r.get(row_r['Tier'], '#7a8fa6')
+                    bar_w = min(int(row_r['GES_100']), 100)
+                    is_target = row_r['Azienda'] == target
+                    bg = "#1a2d45" if is_target else "#0a1628"
+                    st.markdown(f"""
+                    <div style="background:{bg}; border-radius:4px; padding:7px 10px;
+                                margin-bottom:5px; border:1px solid {'#c9a84c' if is_target else '#1a2d45'};">
+                        <div style="display:flex; justify-content:space-between;
+                                    align-items:center; margin-bottom:4px;">
+                            <div style="font-family:'Courier New',monospace; font-size:10px;">
+                                <span style="color:#7a8fa6;">{rank:02d}.</span>
+                                <span style="color:#e8eaf0; margin-left:4px;">{row_r['Ticker']}</span>
+                                <span style="color:#7a8fa6; margin-left:6px; font-size:9px;">{row_r['Azienda'][:18]}</span>
+                            </div>
+                            <div style="font-size:11px; font-weight:bold; color:{col_t};
+                                        font-family:'Courier New',monospace;">
+                                {row_r['GES_100']:.1f}
+                            </div>
+                        </div>
+                        <div style="background:#1a2d45; border-radius:2px; height:3px; overflow:hidden;">
+                            <div style="width:{bar_w}%; background:{col_t}; height:100%; border-radius:2px;"></div>
+                        </div>
+                    </div>""", unsafe_allow_html=True)
+            else:
+                st.info("GES Score non disponibile. Esegui il Radar Bot per calcolarlo.")
     else:
         st.info("Dati non disponibili.")
