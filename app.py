@@ -1013,119 +1013,287 @@ with tab_correlazione:
 
     @st.cache_data(ttl=300)
     def get_macro_data():
-        """Scarica VIX e Treasury 10Y. Restituisce dizionario con valori e variazioni."""
+        """Scarica VIX, Treasury 10Y, DXY. Restituisce dizionario con valori e variazioni."""
         risultati = {}
         macro_tickers = {
-            'VIX': '^VIX',
+            'VIX':          '^VIX',
             'TREASURY_10Y': '^TNX',
-            'DXY': 'DX-Y.NYB',
+            'DXY':          'DX-Y.NYB',
         }
         for nome, ticker in macro_tickers.items():
             try:
                 d = yf.Ticker(ticker).history(period="5d")
                 if len(d) >= 2:
-                    val = d['Close'].iloc[-1]
-                    prev = d['Close'].iloc[-2]
+                    val  = float(d['Close'].iloc[-1])
+                    prev = float(d['Close'].iloc[-2])
                     delta = val - prev
-                    delta_pct = (delta / prev) * 100
-                    risultati[nome] = {'valore': val, 'delta': delta, 'delta_pct': delta_pct}
-            except Exception as e:
-                st.warning(f"Dato macro non disponibile ({nome}): {e}")
+                    risultati[nome] = {
+                        'valore':    val,
+                        'delta':     delta,
+                        'delta_pct': (delta / prev) * 100 if prev else 0,
+                    }
+            except Exception:
+                pass
         return risultati
+
+    @st.cache_data(ttl=300)
+    def get_storico_vix(giorni=90):
+        """Scarica storico VIX per il grafico di regime."""
+        try:
+            d = yf.Ticker('^VIX').history(period=f"{giorni}d")
+            return d['Close'].dropna()
+        except Exception:
+            return None
 
     with st.spinner("Caricamento dati macro..."):
         macro = get_macro_data()
 
+    # ── Calcola pesi portafoglio per Tier (usati nell'analisi sotto) ────────
+    peso_t1 = df_aziende[df_aziende['Tier'] == 'Tier 1']['Peso_Effettivo'].sum() if not df_aziende.empty else 0
+    peso_t2 = df_aziende[df_aziende['Tier'] == 'Tier 2']['Peso_Effettivo'].sum() if not df_aziende.empty else 0
+    peso_t3 = df_aziende[df_aziende['Tier'] == 'Tier 3']['Peso_Effettivo'].sum() if not df_aziende.empty else 0
+    peso_tot = peso_t1 + peso_t2 + peso_t3
+    # Normalizza se necessario (porta a 100)
+    if peso_tot > 0:
+        peso_t1_n = peso_t1 / peso_tot * 100
+        peso_t2_n = peso_t2 / peso_tot * 100
+        peso_t3_n = peso_t3 / peso_tot * 100
+    else:
+        peso_t1_n = peso_t2_n = peso_t3_n = 0
+
     if macro:
+        # ── Riga metriche ───────────────────────────────────────────────────
         col_m1, col_m2, col_m3 = st.columns(3)
 
-        # VIX — Indice della paura
+        # VIX
         if 'VIX' in macro:
             v = macro['VIX']
             vix_val = v['valore']
-            # Regime VIX: <15 calmo, 15-25 normale, 25-35 stress, >35 panico
             if vix_val < 15:
-                regime = "MERCATO CALMO"
-                shield_color = "#00d4aa"
+                regime_vix = "MERCATO CALMO";        vix_color = "#00d4aa"
             elif vix_val < 25:
-                regime = "VOLATILITÀ NORMALE"
-                shield_color = "#c9a84c"
+                regime_vix = "VOLATILITÀ NORMALE";   vix_color = "#c9a84c"
             elif vix_val < 35:
-                regime = "STRESS DI MERCATO"
-                shield_color = "#e05a5a"
+                regime_vix = "STRESS DI MERCATO";    vix_color = "#e05a5a"
             else:
-                regime = "PANICO — SHIELD CRITICO"
-                shield_color = "#ff2222"
+                regime_vix = "PANICO — SHIELD CRITICO"; vix_color = "#ff2222"
 
-            col_m1.metric(
-                "VIX — INDICE DELLA PAURA",
-                f"{vix_val:.2f}",
-                f"{v['delta_pct']:+.2f}% — {regime}"
-            )
-            # Barra visiva del regime VIX
+            col_m1.metric("VIX — INDICE DELLA PAURA", f"{vix_val:.2f}",
+                          f"{v['delta_pct']:+.2f}%")
             vix_pct = min(vix_val / 50, 1.0)
             col_m1.markdown(f"""
             <div style="margin-top:8px;">
                 <div style="display:flex; justify-content:space-between;
                             font-size:10px; color:#7a8fa6; margin-bottom:4px;">
-                    <span>CALMO</span><span>STRESS</span><span>PANICO</span>
+                    <span>CALMO&lt;15</span><span>NORMALE</span><span>STRESS&gt;25</span><span>PANICO&gt;35</span>
                 </div>
-                <div style="background:#1a2d45; border-radius:3px; height:6px; overflow:hidden;">
-                    <div style="width:{vix_pct*100:.0f}%; background:{shield_color};
-                                height:100%; border-radius:3px;"></div>
+                <div style="background:#1a2d45; border-radius:3px; height:8px; overflow:hidden;">
+                    <div style="width:{vix_pct*100:.0f}%; background:{vix_color};
+                                height:100%; border-radius:3px; transition:width 0.4s;"></div>
                 </div>
-                <div style="font-size:10px; color:{shield_color}; margin-top:4px;
-                            font-family:'Courier New',monospace; letter-spacing:0.08em;">
-                    {regime}
+                <div style="font-size:11px; color:{vix_color}; margin-top:5px;
+                            font-family:'Courier New',monospace; font-weight:bold; letter-spacing:0.1em;">
+                    {regime_vix}
                 </div>
-            </div>
-            """, unsafe_allow_html=True)
+            </div>""", unsafe_allow_html=True)
+        else:
+            vix_val = 20.0; regime_vix = "N/D"; vix_color = "#7a8fa6"
 
         # Treasury 10Y
         if 'TREASURY_10Y' in macro:
             t = macro['TREASURY_10Y']
-            col_m2.metric(
-                "TREASURY USA 10Y",
-                f"{t['valore']:.3f}%",
-                f"{t['delta_pct']:+.2f}%"
-            )
-            col_m2.markdown(f"""
-            <div style="margin-top:8px; font-size:11px; color:#7a8fa6;
-                        font-family:'Courier New',monospace; line-height:1.8;">
-                {"⚠ TASSI ALTI — pressione su growth" if t['valore'] > 4.5
-                 else "✓ TASSI MODERATI — contesto neutro" if t['valore'] > 3.5
-                 else "✓ TASSI BASSI — favorevole a tech/growth"}
-            </div>
-            """, unsafe_allow_html=True)
+            tnx = t['valore']
+            if tnx > 4.5:
+                tnx_label = "⚠ TASSI ALTI — pressione su growth/Tier 1"; tnx_color = "#e05a5a"
+            elif tnx > 3.5:
+                tnx_label = "◆ TASSI MODERATI — contesto neutro";          tnx_color = "#c9a84c"
+            else:
+                tnx_label = "✓ TASSI BASSI — favorevole a tech/growth";    tnx_color = "#00d4aa"
 
-        # DXY — Dollaro
+            col_m2.metric("TREASURY USA 10Y", f"{tnx:.3f}%",
+                          f"{t['delta_pct']:+.2f}%")
+            col_m2.markdown(f"""
+            <div style="margin-top:8px;">
+                <div style="background:#1a2d45; border-radius:3px; height:8px; overflow:hidden;">
+                    <div style="width:{min(tnx/6*100,100):.0f}%; background:{tnx_color};
+                                height:100%; border-radius:3px;"></div>
+                </div>
+                <div style="font-size:11px; color:{tnx_color}; margin-top:5px;
+                            font-family:'Courier New',monospace; letter-spacing:0.06em;">
+                    {tnx_label}
+                </div>
+            </div>""", unsafe_allow_html=True)
+        else:
+            tnx = 4.0; tnx_color = "#c9a84c"; tnx_label = "N/D"
+
+        # DXY
         if 'DXY' in macro:
             d = macro['DXY']
-            col_m3.metric(
-                "DXY — INDICE DOLLARO",
-                f"{d['valore']:.2f}",
-                f"{d['delta_pct']:+.2f}%"
-            )
-            col_m3.markdown(f"""
-            <div style="margin-top:8px; font-size:11px; color:#7a8fa6;
-                        font-family:'Courier New',monospace; line-height:1.8;">
-                {"⚠ DOLLARO FORTE — pressione su commodities e mercati EM"
-                 if d['valore'] > 104
-                 else "✓ DOLLARO NEUTRO — contesto equilibrato"}
-            </div>
-            """, unsafe_allow_html=True)
-
-        # Stato Golden Shield contestualizzato con il VIX
-        st.markdown("---")
-        if 'VIX' in macro:
-            vix_val = macro['VIX']['valore']
-            peso_shield = df_aziende[df_aziende['Tier'] == 'Tier 3']['Peso_Effettivo'].sum() if not df_aziende.empty else 0
-            if vix_val > 25 and peso_shield >= 30:
-                st.success(f"GOLDEN SHIELD OPERATIVO in regime di stress (VIX {vix_val:.1f}). Tier 3 al {peso_shield:.1f}% — protezione attiva.")
-            elif vix_val > 25 and peso_shield < 30:
-                st.error(f"ATTENZIONE — VIX a {vix_val:.1f} (stress) ma Tier 3 solo al {peso_shield:.1f}%. Ribilanciare urgentemente.")
+            dxy = d['valore']
+            if dxy > 106:
+                dxy_label = "⚠ DOLLARO FORTE — pressione su EM e commodities"; dxy_color = "#e05a5a"
+            elif dxy > 100:
+                dxy_label = "◆ DOLLARO NEUTRO — contesto equilibrato";           dxy_color = "#c9a84c"
             else:
-                st.info(f"Mercato nella norma (VIX {vix_val:.1f}). Tier 3 al {peso_shield:.1f}% — monitoraggio standard.")
+                dxy_label = "✓ DOLLARO DEBOLE — favorevole a mercati internaz."; dxy_color = "#00d4aa"
+
+            col_m3.metric("DXY — INDICE DOLLARO", f"{dxy:.2f}",
+                          f"{d['delta_pct']:+.2f}%")
+            col_m3.markdown(f"""
+            <div style="margin-top:8px;">
+                <div style="background:#1a2d45; border-radius:3px; height:8px; overflow:hidden;">
+                    <div style="width:{min((dxy-85)/40*100,100):.0f}%; background:{dxy_color};
+                                height:100%; border-radius:3px;"></div>
+                </div>
+                <div style="font-size:11px; color:{dxy_color}; margin-top:5px;
+                            font-family:'Courier New',monospace; letter-spacing:0.06em;">
+                    {dxy_label}
+                </div>
+            </div>""", unsafe_allow_html=True)
+        else:
+            dxy = 102.0; dxy_color = "#c9a84c"
+
+        st.markdown("---")
+
+        # ── BLOCCO CENTRALE: regime + portafoglio contestualizzato ──────────
+        st.markdown("#### REGIME DI MERCATO — IMPATTO SUL PORTAFOGLIO GGIV")
+
+        # Determina regime complessivo (combina VIX + tassi)
+        if vix_val >= 35 or (vix_val >= 25 and tnx > 4.5):
+            regime_label = "CRISI"
+            regime_color = "#ff2222"
+            regime_desc  = "Condizioni di mercato severe. Shield Tier 3 critico. Priorità: protezione capitale."
+            azioni_richieste = [
+                f"Verifica peso Tier 3 — attualmente {peso_t3_n:.1f}% (target ≥30% in crisi)",
+                "Controlla DSRM: ticker in giallo/rosso vanno espulsi con priorità",
+                "Evita nuovi ingressi in Tier 1 finché VIX > 35",
+            ]
+        elif vix_val >= 25 or tnx > 4.5:
+            regime_label = "STRESS"
+            regime_color = "#e05a5a"
+            regime_desc  = "Volatilità elevata. Shield operativo ma da monitorare. Tassi alti penalizzano Tier 1."
+            azioni_richieste = [
+                f"Tier 3 a {peso_t3_n:.1f}% — {'✓ sufficiente' if peso_t3_n >= 25 else '⚠ sotto soglia, considera ribilanciamento'}",
+                f"Tier 1 a {peso_t1_n:.1f}% — aziende pre-revenue più esposte al risk-off",
+                "Monitora ADTV dei Tier 1 OTC/ASX — liquidità può ridursi in stress",
+            ]
+        elif vix_val < 15 and tnx < 3.5:
+            regime_label = "OPPORTUNITÀ"
+            regime_color = "#00d4aa"
+            regime_desc  = "Condizioni ottimali per growth e Tier 1. Bassa volatilità, tassi contenuti."
+            azioni_richieste = [
+                "Valuta nuovi candidati Watchlist — finestra favorevole per ingressi",
+                f"Tier 1 a {peso_t1_n:.1f}% — considera incremento se candidati con GES alto",
+                "Aggiorna Rev_Grafene_Pct — in bull market i report sono più completi",
+            ]
+        else:
+            regime_label = "NORMALE"
+            regime_color = "#c9a84c"
+            regime_desc  = "Volatilità nella norma. Monitoraggio standard. Nessuna azione urgente."
+            azioni_richieste = [
+                "Esegui il run settimanale del Radar Bot il lunedì",
+                f"Distribuzione Tier: T1 {peso_t1_n:.1f}% / T2 {peso_t2_n:.1f}% / T3 {peso_t3_n:.1f}%",
+                "Verifica scadenza prossimo ribilanciamento trimestrale",
+            ]
+
+        # Card regime
+        st.markdown(f"""
+        <div style="background:#0d1b2a; border:1px solid {regime_color}; border-radius:6px;
+                    padding:16px 20px; margin-bottom:16px;">
+            <div style="display:flex; align-items:center; gap:14px; margin-bottom:10px;">
+                <div style="font-size:22px; font-weight:bold; color:{regime_color};
+                            font-family:'Courier New',monospace; letter-spacing:0.15em;">
+                    ◉ REGIME: {regime_label}
+                </div>
+            </div>
+            <div style="font-size:12px; color:#b0bec5; font-family:'Courier New',monospace;
+                        line-height:1.7; margin-bottom:12px;">
+                {regime_desc}
+            </div>
+            <div style="font-size:11px; color:#7a8fa6; font-family:'Courier New',monospace;">
+                AZIONI SUGGERITE:
+            </div>
+            {''.join(f'<div style="font-size:11px; color:#e8eaf0; font-family:\'Courier New\',monospace; margin-top:4px; padding-left:10px;">→ {a}</div>' for a in azioni_richieste)}
+        </div>
+        """, unsafe_allow_html=True)
+
+        # ── Gauge pesi Tier contestualizzati ────────────────────────────────
+        col_g1, col_g2, col_g3 = st.columns(3)
+
+        def render_gauge_tier(col, label, peso_n, color, soglia_min, soglia_ok, regime_color):
+            """Barra peso Tier con semaforo contestuale al regime."""
+            if peso_n >= soglia_ok:
+                stato = "✓ OK"; stato_c = "#00d4aa"
+            elif peso_n >= soglia_min:
+                stato = "◆ WATCH"; stato_c = "#c9a84c"
+            else:
+                stato = "⚠ BASSO"; stato_c = "#e05a5a"
+            col.markdown(f"""
+            <div style="background:#0d1b2a; border:1px solid #1a2d45; border-radius:5px;
+                        padding:12px 14px; margin-bottom:8px;">
+                <div style="font-size:10px; color:#7a8fa6; font-family:'Courier New',monospace;
+                            letter-spacing:0.08em; margin-bottom:6px;">{label}</div>
+                <div style="font-size:24px; font-weight:bold; color:{color};
+                            font-family:'Courier New',monospace;">{peso_n:.1f}%</div>
+                <div style="background:#1a2d45; border-radius:3px; height:6px; margin:6px 0; overflow:hidden;">
+                    <div style="width:{min(peso_n,100):.0f}%; background:{color};
+                                height:100%; border-radius:3px;"></div>
+                </div>
+                <div style="font-size:10px; color:{stato_c}; font-family:'Courier New',monospace;">
+                    {stato} (soglia: {soglia_ok:.0f}%)
+                </div>
+            </div>""", unsafe_allow_html=True)
+
+        render_gauge_tier(col_g1, "TIER 1 — PURE PLAYERS (alpha)", peso_t1_n, "#00d4aa", 25, 30, regime_color)
+        render_gauge_tier(col_g2, "TIER 2 — SUPPLY CHAIN (infrastruttura)", peso_t2_n, "#c9a84c", 30, 35, regime_color)
+        render_gauge_tier(col_g3, "TIER 3 — SHIELD (protezione)", peso_t3_n, "#e05a5a" if peso_t3_n < 25 else "#00d4aa", 25, 30, regime_color)
+
+        # ── Grafico storico VIX 90 giorni ───────────────────────────────────
+        st.markdown("---")
+        st.markdown("#### STORICO VIX 90 GIORNI — REGIME DI VOLATILITÀ")
+        with st.spinner("Caricamento storico VIX..."):
+            storico_vix = get_storico_vix(90)
+
+        if storico_vix is not None and len(storico_vix) > 5:
+            fig_vix = go.Figure()
+            # Aree di regime colorate
+            date_vix = storico_vix.index
+            x0, x1 = date_vix[0], date_vix[-1]
+            fig_vix.add_hrect(y0=0,  y1=15, fillcolor="#00d4aa", opacity=0.06, line_width=0)
+            fig_vix.add_hrect(y0=15, y1=25, fillcolor="#c9a84c", opacity=0.06, line_width=0)
+            fig_vix.add_hrect(y0=25, y1=35, fillcolor="#e05a5a", opacity=0.08, line_width=0)
+            fig_vix.add_hrect(y0=35, y1=80, fillcolor="#ff2222", opacity=0.08, line_width=0)
+            # Linee soglia
+            for y, label, col in [(15, "CALMO", "#00d4aa"), (25, "STRESS", "#e05a5a"), (35, "PANICO", "#ff2222")]:
+                fig_vix.add_hline(y=y, line_dash="dot", line_color=col, line_width=1,
+                                  annotation_text=label, annotation_position="left",
+                                  annotation_font=dict(color=col, size=9, family="Courier New"))
+            # Linea VIX
+            fig_vix.add_trace(go.Scatter(
+                x=date_vix, y=storico_vix.values,
+                mode='lines', name='VIX',
+                line=dict(color='#e8eaf0', width=1.5),
+                fill='tozeroy', fillcolor='rgba(232,234,240,0.05)',
+            ))
+            # Punto corrente
+            fig_vix.add_trace(go.Scatter(
+                x=[date_vix[-1]], y=[storico_vix.iloc[-1]],
+                mode='markers', name=f'Oggi: {storico_vix.iloc[-1]:.2f}',
+                marker=dict(color=vix_color, size=10, symbol='circle'),
+            ))
+            fig_vix.update_layout(
+                paper_bgcolor='#0d1b2a', plot_bgcolor='#0d1b2a',
+                font=dict(color='#7a8fa6', family='Courier New', size=10),
+                xaxis=dict(gridcolor='#1a2d45', showgrid=True),
+                yaxis=dict(gridcolor='#1a2d45', showgrid=True, title='VIX'),
+                height=220, margin=dict(t=10, b=30, l=50, r=10),
+                showlegend=True,
+                legend=dict(bgcolor='#0d1b2a', bordercolor='#1a2d45', font=dict(size=9)),
+            )
+            st.plotly_chart(fig_vix, use_container_width=True)
+        else:
+            st.caption("Storico VIX non disponibile — controlla la connessione.")
+
     else:
         st.warning("Impossibile caricare dati macro. Controlla la connessione.")
 
@@ -1133,11 +1301,16 @@ with tab_correlazione:
 
     # ---- SEZIONE B: MATRICE DI CORRELAZIONE ----
     st.markdown("### MATRICE DI CORRELAZIONE — DECORRELAZIONE TIER")
-    st.caption("Scarica 90 giorni di dati storici per tutte le aziende in portafoglio e calcola la correlazione dei rendimenti giornalieri.")
+    st.caption("Rendimenti giornalieri su 90 giorni. I ticker OTC/ASX con storia insufficiente su Yahoo Finance vengono esclusi automaticamente con spiegazione.")
 
     @st.cache_data(ttl=3600)
     def calcola_correlazione(tickers: tuple):
-        """Scarica 90gg di dati e calcola la matrice di correlazione dei rendimenti."""
+        """
+        Scarica 90gg di dati e calcola la matrice di correlazione dei rendimenti.
+        Restituisce: (corr_matrix, rendimenti, dict_status_per_ticker)
+        dict_status: { ticker: {'ok': bool, 'motivo': str, 'giorni': int} }
+        """
+        status = {t: {'ok': False, 'motivo': 'Non scaricato', 'giorni': 0} for t in tickers}
         try:
             raw = yf.download(
                 list(tickers), period="90d",
@@ -1145,90 +1318,131 @@ with tab_correlazione:
                 group_by="ticker",
             )
             if raw is None or raw.empty:
-                return None, None
+                return None, None, status
 
-            # Estrae i prezzi Close gestendo tutte le strutture possibili di yfinance
+            # Estrae Close gestendo tutte le strutture di yfinance
             if isinstance(raw.columns, pd.MultiIndex):
-                # Struttura (Metric, Ticker) — es. ('Close', 'AAPL')
                 if 'Close' in raw.columns.get_level_values(0):
                     prezzi = raw['Close']
-                # Struttura (Ticker, Metric) — es. ('AAPL', 'Close')
                 elif 'Close' in raw.columns.get_level_values(1):
                     prezzi = raw.xs('Close', axis=1, level=1)
                 else:
-                    return None, None
+                    return None, None, status
             else:
-                # Singolo ticker — colonna piatta
                 if 'Close' in raw.columns:
                     prezzi = raw[['Close']]
                     prezzi.columns = list(tickers)[:1]
                 else:
-                    return None, None
+                    return None, None, status
 
-            # Rimuovi colonne completamente vuote (ticker non trovati)
-            prezzi = prezzi.dropna(axis=1, how='all')
+            # Analizza ogni ticker individualmente per il report di status
+            for t in tickers:
+                if t not in prezzi.columns:
+                    status[t] = {'ok': False, 'motivo': 'Ticker non trovato su Yahoo Finance', 'giorni': 0}
+                    continue
+                col = prezzi[t].dropna()
+                giorni = len(col)
+                if giorni == 0:
+                    status[t] = {'ok': False, 'motivo': 'Nessun dato disponibile (possibile delisting)', 'giorni': 0}
+                elif giorni < 10:
+                    status[t] = {'ok': False, 'motivo': f'Solo {giorni} giorni di storia (min 10)', 'giorni': giorni}
+                elif giorni < 30:
+                    status[t] = {'ok': True, 'motivo': f'Dati limitati ({giorni}gg) — correlazione meno affidabile', 'giorni': giorni}
+                else:
+                    status[t] = {'ok': True, 'motivo': f'{giorni} giorni disponibili', 'giorni': giorni}
 
-            if prezzi.shape[1] < 2:
-                return None, None
+            # Rimuovi ticker senza dati sufficienti (meno di 10 giorni)
+            ticker_validi = [t for t in tickers if status[t]['giorni'] >= 10 and t in prezzi.columns]
+            if len(ticker_validi) < 2:
+                return None, None, status
 
-            rendimenti = prezzi.pct_change().dropna(how='all')
-
-            # Rimuovi righe con troppi NaN
-            rendimenti = rendimenti.dropna(thresh=int(rendimenti.shape[1] * 0.5))
+            prezzi_clean = prezzi[ticker_validi].dropna(axis=1, how='all')
+            rendimenti = prezzi_clean.pct_change().dropna(how='all')
+            rendimenti = rendimenti.dropna(thresh=max(2, int(rendimenti.shape[1] * 0.5)))
 
             if rendimenti.shape[0] < 10:
-                return None, None
+                return None, None, status
 
-            return rendimenti.corr(), rendimenti
+            return rendimenti.corr(), rendimenti, status
 
         except Exception as e:
-            st.warning(f"Errore nel calcolo correlazione: {e}")
-            return None, None
+            return None, None, status
 
     if not df_aziende.empty and 'Ticker' in df_aziende.columns:
         tickers_portafoglio = tuple(df_aziende['Ticker'].dropna().unique())
 
         if len(tickers_portafoglio) >= 2:
-            with st.spinner(f"Scaricando 90 giorni di dati per {len(tickers_portafoglio)} aziende..."):
-                corr_matrix, rendimenti = calcola_correlazione(tickers_portafoglio)
+            with st.spinner(f"Scaricando 90 giorni per {len(tickers_portafoglio)} ticker..."):
+                corr_matrix, rendimenti, ticker_status = calcola_correlazione(tickers_portafoglio)
+
+            # ── Report status per ticker ────────────────────────────────────
+            ticker_ok    = [t for t in tickers_portafoglio if ticker_status[t]['ok']]
+            ticker_fail  = [t for t in tickers_portafoglio if not ticker_status[t]['ok']]
+            ticker_warn  = [t for t in ticker_ok if ticker_status[t]['giorni'] < 30]
+
+            if ticker_fail or ticker_warn:
+                with st.expander(f"ℹ️ Report dati — {len(ticker_ok)} ticker in matrice, {len(ticker_fail)} esclusi", expanded=len(ticker_fail) > 0):
+                    ticker_to_nome_rep = dict(zip(df_aziende['Ticker'], df_aziende['Azienda']))
+                    # Esclusi
+                    if ticker_fail:
+                        st.markdown("**❌ Esclusi dalla matrice — dati insufficienti:**")
+                        for t in ticker_fail:
+                            nome = ticker_to_nome_rep.get(t, t)
+                            motivo = ticker_status[t]['motivo']
+                            tier_t = df_aziende[df_aziende['Ticker'] == t]['Tier'].values
+                            tier_str = tier_t[0] if len(tier_t) else "?"
+                            st.markdown(f"""
+                            <div style="background:#1a0a0a; border-left:3px solid #e05a5a;
+                                        padding:6px 10px; margin:4px 0; border-radius:3px;
+                                        font-family:'Courier New',monospace; font-size:11px;">
+                                <span style="color:#e05a5a; font-weight:bold;">{t}</span>
+                                <span style="color:#7a8fa6;"> ({nome} — {tier_str})</span><br>
+                                <span style="color:#b0bec5;">→ {motivo}</span>
+                            </div>""", unsafe_allow_html=True)
+                    # Avvertimenti
+                    if ticker_warn:
+                        st.markdown("**⚠️ In matrice ma con storia limitata (&lt;30 giorni):**")
+                        for t in ticker_warn:
+                            nome = ticker_to_nome_rep.get(t, t)
+                            st.markdown(f"""
+                            <div style="background:#1a1400; border-left:3px solid #c9a84c;
+                                        padding:6px 10px; margin:4px 0; border-radius:3px;
+                                        font-family:'Courier New',monospace; font-size:11px;">
+                                <span style="color:#c9a84c; font-weight:bold;">{t}</span>
+                                <span style="color:#7a8fa6;"> — {nome}</span><br>
+                                <span style="color:#b0bec5;">→ {ticker_status[t]['motivo']}</span>
+                            </div>""", unsafe_allow_html=True)
 
             if corr_matrix is not None and not corr_matrix.empty:
 
-                # Rimuovi righe/colonne con tutti NaN (ticker senza dati storici)
+                # Pulizia finale della matrice
                 corr_clean = corr_matrix.dropna(how='all', axis=0).dropna(how='all', axis=1)
-
-                # Ticker esclusi per dati insufficienti
-                esclusi = [t for t in corr_matrix.columns if t not in corr_clean.columns]
-                if esclusi:
-                    ticker_to_nome_warn = dict(zip(df_aziende['Ticker'], df_aziende['Azienda']))
-                    nomi_esclusi = [ticker_to_nome_warn.get(t, t) for t in esclusi]
-                    st.warning(f"Dati storici insufficienti per: {', '.join(nomi_esclusi)}. "
-                               f"Esclusi dalla matrice. Possibile causa: ticker OTC/illiquidi o quotazione recente.")
-
                 corr_matrix = corr_clean
 
-                # Sostituisce i ticker con i nomi azienda se disponibili
+                # Sostituisce ticker con nomi azienda
                 ticker_to_nome = dict(zip(df_aziende['Ticker'], df_aziende['Azienda']))
                 corr_display = corr_matrix.copy()
                 corr_display.columns = [ticker_to_nome.get(t, t) for t in corr_display.columns]
-                corr_display.index = [ticker_to_nome.get(t, t) for t in corr_display.index]
+                corr_display.index   = [ticker_to_nome.get(t, t) for t in corr_display.index]
 
-                # Heatmap con scala divergente: rosso=correlato, verde=decorrelato
+                # Etichette brevi (max 15 char) per leggibilità
+                def short(s): return s[:14] + '…' if len(s) > 15 else s
+                corr_display.columns = [short(c) for c in corr_display.columns]
+                corr_display.index   = [short(c) for c in corr_display.index]
+
                 fig_heatmap = go.Figure(go.Heatmap(
                     z=corr_display.values,
                     x=corr_display.columns.tolist(),
                     y=corr_display.index.tolist(),
                     colorscale=[
-                        [0.0,  '#00d4aa'],   # -1.0 = decorrelazione perfetta = verde
-                        [0.5,  '#0d1b2a'],   # 0.0  = nessuna correlazione = neutro
-                        [1.0,  '#e05a5a'],   # +1.0 = correlazione perfetta = rosso
+                        [0.0,  '#00d4aa'],
+                        [0.5,  '#0d1b2a'],
+                        [1.0,  '#e05a5a'],
                     ],
-                    zmid=0,
-                    zmin=-1,
-                    zmax=1,
+                    zmid=0, zmin=-1, zmax=1,
                     text=np.round(corr_display.values, 2),
                     texttemplate="%{text}",
-                    textfont=dict(size=10, color='#e8eaf0', family='Courier New'),
+                    textfont=dict(size=9, color='#e8eaf0', family='Courier New'),
                     hovertemplate='%{y} / %{x}<br>Correlazione: %{z:.3f}<extra></extra>',
                     colorbar=dict(
                         tickcolor='#7a8fa6',
@@ -1237,18 +1451,18 @@ with tab_correlazione:
                         bgcolor='#0d1b2a',
                     )
                 ))
+                n = len(corr_display)
                 fig_heatmap.update_layout(
-                    paper_bgcolor='#0d1b2a',
-                    plot_bgcolor='#0d1b2a',
-                    font=dict(color='#e8eaf0', family='Courier New', size=10),
-                    xaxis=dict(tickangle=-35, tickfont=dict(size=9), gridcolor='#1a2d45'),
-                    yaxis=dict(tickfont=dict(size=9), gridcolor='#1a2d45'),
-                    margin=dict(t=20, b=80, l=120, r=20),
-                    height=max(400, len(tickers_portafoglio) * 38),
+                    paper_bgcolor='#0d1b2a', plot_bgcolor='#0d1b2a',
+                    font=dict(color='#e8eaf0', family='Courier New', size=9),
+                    xaxis=dict(tickangle=-40, tickfont=dict(size=8), gridcolor='#1a2d45'),
+                    yaxis=dict(tickfont=dict(size=8), gridcolor='#1a2d45'),
+                    margin=dict(t=20, b=100, l=130, r=20),
+                    height=max(380, n * 36),
                 )
                 st.plotly_chart(fig_heatmap, use_container_width=True)
 
-                # Analisi automatica della decorrelazione del Tier 3
+                # ── Analisi decorrelazione Tier 3 ──────────────────────────
                 st.markdown("#### ANALISI AUTOMATICA DECORRELAZIONE TIER 3")
                 if 'Tier' in df_aziende.columns:
                     ticker_t3 = df_aziende[df_aziende['Tier'] == 'Tier 3']['Ticker'].tolist()
@@ -1260,24 +1474,38 @@ with tab_correlazione:
                             for t1 in ticker_t1:
                                 if t3 in corr_matrix.columns and t1 in corr_matrix.columns:
                                     rho = corr_matrix.loc[t3, t1]
-                                    nome_t3 = ticker_to_nome.get(t3, t3)
-                                    nome_t1 = ticker_to_nome.get(t1, t1)
-                                    coppie_cross.append((nome_t3, nome_t1, rho))
+                                    if not np.isnan(rho):
+                                        coppie_cross.append((
+                                            ticker_to_nome.get(t3, t3),
+                                            ticker_to_nome.get(t1, t1),
+                                            rho
+                                        ))
 
                         if coppie_cross:
-                            valori_cross = [c[2] for c in coppie_cross if not np.isnan(c[2])]
-                            if not valori_cross:
-                                st.info("DATI INSUFFICIENTI — Impossibile calcolare la correlazione. Servono almeno 30 giorni di dati storici comuni tra Tier 1 e Tier 3.")
+                            valori_cross = [c[2] for c in coppie_cross]
+                            media_cross  = np.mean(valori_cross)
+                            if media_cross < 0.3:
+                                st.success(f"SHIELD CONFERMATO — Correlazione media Tier 3 / Tier 1: {media_cross:.2f}. Il Tier 3 è decorrelato e funziona da scudo.")
+                            elif media_cross < 0.6:
+                                st.warning(f"DECORRELAZIONE PARZIALE — Correlazione media Tier 3 / Tier 1: {media_cross:.2f}. Verificare composizione Tier 3.")
                             else:
-                                media_cross = np.mean(valori_cross)
-                                if media_cross < 0.3:
-                                    st.success(f"SHIELD CONFERMATO — Correlazione media Tier 3 / Tier 1: {media_cross:.2f}. Il Tier 3 è effettivamente decorrelato e funziona da scudo.")
-                                elif media_cross < 0.6:
-                                    st.warning(f"DECORRELAZIONE PARZIALE — Correlazione media Tier 3 / Tier 1: {media_cross:.2f}. Verificare la composizione del Tier 3.")
-                                else:
-                                    st.error(f"SHIELD DEBOLE — Correlazione media Tier 3 / Tier 1: {media_cross:.2f}. Il Tier 3 si muove troppo in linea col Tier 1.")
+                                st.error(f"SHIELD DEBOLE — Correlazione media Tier 3 / Tier 1: {media_cross:.2f}. Tier 3 troppo correlato a Tier 1.")
+
+                            # Tabella coppie peggiori (più correlate)
+                            coppie_sorted = sorted(coppie_cross, key=lambda x: x[2], reverse=True)[:5]
+                            st.caption("Top 5 coppie più correlate (T3/T1):")
+                            for t3n, t1n, rho in coppie_sorted:
+                                col_rho = "#e05a5a" if rho > 0.6 else "#c9a84c" if rho > 0.3 else "#00d4aa"
+                                st.markdown(f"""
+                                <div style="font-family:'Courier New',monospace; font-size:11px;
+                                            padding:3px 0; color:#b0bec5;">
+                                    <span style="color:{col_rho}; font-weight:bold;">{rho:+.2f}</span>
+                                    &nbsp; {short(t3n)} ↔ {short(t1n)}
+                                </div>""", unsafe_allow_html=True)
+                        else:
+                            st.info("DATI INSUFFICIENTI — Servono almeno 30 giorni di storia comune tra Tier 1 e Tier 3.")
             else:
-                st.warning("Impossibile calcolare la matrice. I ticker nel CSV potrebbero non essere riconosciuti da Yahoo Finance.")
+                st.warning("Impossibile calcolare la matrice — nessun ticker ha dati sufficienti su Yahoo Finance.")
         else:
             st.info("Servono almeno 2 aziende nel portafoglio per calcolare la correlazione.")
     else:
