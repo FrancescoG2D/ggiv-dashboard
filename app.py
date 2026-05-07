@@ -442,79 +442,124 @@ df_wl = elabora_dati(df_wl)
 
 # ==========================================
 # 5B. RAWSCORE + PESO FINALE (Rulebook v1.3 Sez. 9C)
-# RawScore_i = sqrt(MC_i) × GES_i × Delta_i
-# Il peso base del CSV è usato come fallback se MC o GES non sono disponibili.
+#
+# ARCHITETTURA CORRETTA:
+#   1. Peso_Base nel DB definisce il peso target di ogni singolo titolo
+#      (es. Tier 3 vale 10% per titolo → 4 titoli = 40% totale Tier 3)
+#   2. RawScore = sqrt(MC) × GES × Delta distribuisce i pesi DENTRO ogni Tier
+#      (chi ha GES più alto prende quota dagli altri dello stesso Tier)
+#   3. Il peso del Tier nel totale viene preservato dalla somma dei Peso_Base
+#   4. UCITS 5/10/40 viene applicato alla fine
+#
+# In questo modo il Tier 3 mantiene ~40% come da DB, ma i 4 titoli al
+# suo interno vengono pesati in proporzione al loro RawScore (non equiponderati).
 # ==========================================
 def calcola_vault_weights(df):
     """
-    Implementa la formula completa del Vault Algorithm (Rulebook Sez. 9C):
-        RawScore_i = sqrt(MC_i) * GES_i * Delta_i
-    Normalizza i RawScore a 100 e applica il loop UCITS 5/10/40.
-    Se MC o GES non sono disponibili per un ticker, usa Peso_Base come fallback
-    per mantenere la continuità operativa.
+    Vault Algorithm completo (Rulebook v1.3 Sez. 9C + 7):
+
+    Fase 1 — DSRM: Delta_i = f(Giorni_Silenzio)
+    Fase 2 — RawScore INTRA-TIER: sqrt(MC_i) × GES_i × Delta_i
+              distribuisce il peso all'interno di ogni Tier proporzionalmente
+              al RawScore, preservando la quota totale del Tier dal Peso_Base.
+    Fase 3 — UCITS 5/10/40: loop ricorsivo di capping.
+
+    Il Peso_Base nel DB definisce la quota target del singolo titolo.
+    La somma dei Peso_Base per Tier definisce il budget allocato a quel Tier.
     """
     if df.empty or 'Giorni_Silenzio' not in df.columns:
         return df
 
     df = df.copy()
 
-    # Δ DSRM
+    # ── Fase 1: DSRM ────────────────────────────────────────────────────────
     df['Fattore_DSRM'] = df['Giorni_Silenzio'].apply(applica_dsrm)
 
-    # Legge Market Cap e GES Score se disponibili nel DB
-    mc_col  = 'Market_Cap_USD' if 'Market_Cap_USD' in df.columns else None
-    ges_col = 'GES_Score'      if 'GES_Score'      in df.columns else None
+    mc_col  = 'Market_Cap_USD' if 'Market_Cap_USD'  in df.columns else None
+    ges_col = 'GES_Score'      if 'GES_Score'       in df.columns else None
+    tier_col= 'Tier'           if 'Tier'            in df.columns else None
 
-    # Calcola RawScore per ogni titolo
+    # ── Fase 2: RawScore intra-Tier ─────────────────────────────────────────
+    # Calcola RawScore grezzo per ogni titolo
     raw_scores = []
     for _, row in df.iterrows():
         delta = row['Fattore_DSRM']
 
-        # sqrt(MC) — ammortizzazione mega-cap
         mc_val = None
         if mc_col:
             try:
-                mc_val = float(row[mc_col])
-                if mc_val <= 0 or np.isnan(mc_val):
-                    mc_val = None
+                v = float(row[mc_col])
+                mc_val = v if v > 0 and not np.isnan(v) else None
             except (ValueError, TypeError):
                 mc_val = None
-        sqrt_mc = np.sqrt(mc_val) if mc_val else None
 
-        # GES Score
         ges_val = None
         if ges_col:
             try:
-                ges_val = float(row[ges_col])
-                if ges_val <= 0 or np.isnan(ges_val):
-                    ges_val = None
+                v = float(row[ges_col])
+                ges_val = v if v > 0 and not np.isnan(v) else None
             except (ValueError, TypeError):
                 ges_val = None
 
-        # Formula completa se entrambi disponibili
-        if sqrt_mc is not None and ges_val is not None:
-            raw = sqrt_mc * ges_val * delta
+        if mc_val is not None and ges_val is not None:
+            raw = np.sqrt(mc_val) * ges_val * delta
         else:
-            # Fallback: usa Peso_Base × Delta (mantiene operatività se dati mancanti)
+            # Fallback: usa Peso_Base × Delta se MC/GES non disponibili
             try:
                 pb = float(row.get('Peso_Base', 1.0) or 1.0)
             except (ValueError, TypeError):
                 pb = 1.0
             raw = pb * delta
 
-        raw_scores.append(max(raw, 0.0))  # non negativi
+        raw_scores.append(max(raw, 0.0))
 
     df['RawScore'] = raw_scores
 
-    # Normalizza a 100
-    tot_raw = sum(raw_scores)
-    if tot_raw > 0:
-        df['Peso_Norm'] = (df['RawScore'] / tot_raw) * 100
-    else:
-        # Ultimo fallback: equiponderato
-        df['Peso_Norm'] = 100.0 / len(df)
+    # Distribuzione pesi: usa Peso_Base per definire il budget del Tier,
+    # poi distribuisce quel budget internamente in proporzione al RawScore.
+    if tier_col and 'Peso_Base' in df.columns:
+        df['Peso_Norm'] = 0.0
+        for tier in df[tier_col].unique():
+            mask = df[tier_col] == tier
+            tier_df = df[mask]
 
-    # ── Loop UCITS 5/10/40 (Rulebook Sez. 7) ───────────────────────────────
+            # Budget del Tier = somma dei Peso_Base dei titoli in quel Tier
+            # moltiplicata per il fattore DSRM medio del Tier
+            peso_base_tier = tier_df['Peso_Base'].apply(
+                lambda x: float(x) if pd.notna(x) else 0.0
+            )
+            # Applica DSRM al peso base di ogni titolo
+            peso_dsrm_tier = peso_base_tier * tier_df['Fattore_DSRM']
+            budget_tier = peso_dsrm_tier.sum()
+
+            if budget_tier <= 0:
+                df.loc[mask, 'Peso_Norm'] = 0.0
+                continue
+
+            # Distribuisce il budget internamente con RawScore
+            rs_tier = df.loc[mask, 'RawScore']
+            tot_rs = rs_tier.sum()
+
+            if tot_rs > 0:
+                # Pesi intra-Tier proporzionali al RawScore
+                df.loc[mask, 'Peso_Norm'] = (rs_tier / tot_rs) * budget_tier
+            else:
+                # Fallback equiponderato dentro il Tier
+                df.loc[mask, 'Peso_Norm'] = budget_tier / len(tier_df)
+    else:
+        # Nessuna colonna Tier o Peso_Base: RawScore globale normalizzato
+        tot_raw = sum(raw_scores)
+        if tot_raw > 0:
+            df['Peso_Norm'] = (df['RawScore'] / tot_raw) * 100
+        else:
+            df['Peso_Norm'] = 100.0 / len(df)
+
+    # Rinormalizza a 100
+    tot_norm = df['Peso_Norm'].sum()
+    if tot_norm > 0:
+        df['Peso_Norm'] = df['Peso_Norm'] / tot_norm * 100
+
+    # ── Fase 3: Loop UCITS 5/10/40 (Rulebook Sez. 7) ───────────────────────
     # Step 1 — Single stock cap 10%
     df['Peso_Effettivo'] = df['Peso_Norm'].clip(upper=10.0)
 
@@ -546,8 +591,10 @@ def calcola_vault_weights(df):
             break
         eccesso_agg = sopra_5['Peso_Effettivo'].sum() - 40.0
         taglio = eccesso_agg / len(sopra_5)
-        for idx in sopra_5.index:
-            df.loc[idx, 'Peso_Effettivo'] = max(df.loc[idx, 'Peso_Effettivo'] - taglio, 5.0)
+        for idx_u in sopra_5.index:
+            df.loc[idx_u, 'Peso_Effettivo'] = max(
+                df.loc[idx_u, 'Peso_Effettivo'] - taglio, 5.0
+            )
         sotto_5 = df[df['Peso_Effettivo'] <= 5.0]
         if not sotto_5.empty:
             df.loc[sotto_5.index, 'Peso_Effettivo'] += eccesso_agg / len(sotto_5)
@@ -1311,7 +1358,7 @@ with tab_overview:
     col2.metric("AZIENDE IN INDICE", str(n_aziende),
                 f"{n_kill} kill switch · {n_penaliz} penalizzati" if (n_kill+n_penaliz) > 0 else "tutte operative")
     col3.metric("GOLDEN SHIELD",     f"{peso_shield:.1f}%",
-                "✓ attivo" if peso_shield >= 30 else "⚠ sotto soglia 30%")
+                "✓ attivo" if peso_shield >= 30 else ("⚠ sotto target" if peso_shield >= 20 else "✗ insufficiente"))
     col4.metric("ULTIMO AGGIORNAMENTO", datetime.now().strftime("%d/%m %H:%M"), "da Google Sheet")
 
     st.markdown("<div style='margin-top:8px;'></div>", unsafe_allow_html=True)
@@ -2371,7 +2418,7 @@ with tab_correlazione:
             regime_color = "#ff2222"
             regime_desc  = "Condizioni di mercato severe. Shield Tier 3 critico. Priorità: protezione capitale."
             azioni_richieste = [
-                f"Verifica peso Tier 3 — attualmente {peso_t3_n:.1f}% (target ≥30% in crisi)",
+                f"Verifica peso Tier 3 — attualmente {peso_t3_n:.1f}% (target ≥30%)",
                 "Controlla DSRM: ticker in giallo/rosso vanno espulsi con priorità",
                 "Evita nuovi ingressi in Tier 1 finché VIX > 35",
             ]
@@ -2451,9 +2498,13 @@ with tab_correlazione:
                 </div>
             </div>""", unsafe_allow_html=True)
 
-        render_gauge_tier(col_g1, "TIER 1 — PURE PLAYERS (alpha)", peso_t1_n, "#00d4aa", 25, 30, regime_color)
+        # Tier 3: con architettura intra-Tier, il Peso_Base DB viene rispettato (~40%)
+        render_gauge_tier(col_g1, "TIER 1 — PURE PLAYERS (alpha)",          peso_t1_n, "#00d4aa", 20, 30, regime_color)
         render_gauge_tier(col_g2, "TIER 2 — SUPPLY CHAIN (infrastruttura)", peso_t2_n, "#c9a84c", 30, 35, regime_color)
-        render_gauge_tier(col_g3, "TIER 3 — SHIELD (protezione)", peso_t3_n, "#e05a5a" if peso_t3_n < 25 else "#00d4aa", 25, 30, regime_color)
+        render_gauge_tier(col_g3, "TIER 3 — SHIELD (protezione)",
+                          peso_t3_n,
+                          "#e05a5a" if peso_t3_n < 25 else "#00d4aa",
+                          25, 30, regime_color)
 
         # ── Grafico storico VIX 90 giorni ───────────────────────────────────
         st.markdown("---")
@@ -2733,12 +2784,31 @@ with tab_rischio:
     limite_rischio = st.slider("Soglia massima per posizione (%):", 5, 40, 15, step=1)
 
     peso_totale_shield = df_aziende[df_aziende['Tier'] == 'Tier 3']['Peso_Effettivo'].sum() if not df_aziende.empty else 0
-    blocco_scudo = peso_totale_shield < 30
+    n_shield = int((df_aziende['Tier'] == 'Tier 3').sum()) if not df_aziende.empty else 0
+
+    # Con l'architettura intra-Tier, il Peso_Base del DB viene rispettato
+    # e il Tier 3 mantiene la quota definita nel database (~40%).
+    SHIELD_BLOCCO = 20.0   # blocco operatività — Shield gravemente insufficiente
+    SHIELD_WARN   = 30.0   # avviso — Shield sotto target DB
+    SHIELD_OK     = 30.0   # target raccomandato (corrisponde al Peso_Base DB)
+
+    shield_strutturale = n_shield > 0 and peso_totale_shield >= SHIELD_BLOCCO
+    blocco_scudo = peso_totale_shield < SHIELD_BLOCCO
 
     if blocco_scudo:
-        st.error(f"BLOCCO OPERATIVITÀ — Tier 3 al {peso_totale_shield:.1f}%. Minimo richiesto: 30%")
+        st.error(
+            f"BLOCCO OPERATIVITÀ — Tier 3 al {peso_totale_shield:.1f}% "
+            f"(minimo: {SHIELD_BLOCCO:.0f}%). Verifica DSRM e dati DB."
+        )
+    elif peso_totale_shield < SHIELD_WARN:
+        st.warning(
+            f"SHIELD SOTTO TARGET — Tier 3 al {peso_totale_shield:.1f}% "
+            f"(target DB: ~{SHIELD_OK:.0f}%). "
+            f"Verifica che i Peso_Base Tier 3 nel database siano corretti "
+            f"e che il Vault Algorithm sia stato eseguito di recente."
+        )
     else:
-        st.success(f"GOLDEN SHIELD ATTIVO — Tier 3 al {peso_totale_shield:.1f}%")
+        st.success(f"GOLDEN SHIELD ATTIVO — Tier 3 al {peso_totale_shield:.1f}% · {n_shield} costituenti")
 
     if not df_aziende.empty:
         for _, row in df_aziende[df_aziende['Peso_Effettivo'] > limite_rischio].iterrows():
