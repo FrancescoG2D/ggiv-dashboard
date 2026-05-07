@@ -446,6 +446,7 @@ if not df_aziende.empty and 'Giorni_Silenzio' in df_aziende.columns:
     df_aziende['Percentuale_Persa'] = df_aziende['Peso_Base'] - df_aziende['Peso_Effettivo']
 
 # Aggiorna il titolo della tab browser con DSRM status
+# NOTA: st.markdown con <title> causa rendering HTML visibile — uso JS invece
 if not df_aziende.empty and 'Fattore_DSRM' in df_aziende.columns:
     _n_kill = int((df_aziende['Fattore_DSRM'] == 0.0).sum())
     _n_warn = int((df_aziende['Fattore_DSRM'] == 0.75).sum())
@@ -455,7 +456,10 @@ if not df_aziende.empty and 'Fattore_DSRM' in df_aziende.columns:
         _title = f"⬡ GGIV · {_n_warn} WARN"
     else:
         _title = "⬡ GGIV Terminal — OK"
-    st.markdown(f"<title>{_title}</title>", unsafe_allow_html=True)
+    st.markdown(
+        f"<script>document.title = '{_title}';</script>",
+        unsafe_allow_html=True
+    )
 
 # ==========================================
 # 6. TICKER HEADER
@@ -507,8 +511,11 @@ dati_indici = get_tutti_indici()
 
 # ── Valore GGIV live per l'header — calcolo leggero (1mo, cached 2min) ──────
 @st.cache_data(ttl=120)
-def get_valore_header(tickers_tuple):
-    """Calcola solo il valore corrente dell'indice per l'header. Periodo breve = veloce."""
+def get_valore_header(tickers_tuple, pesi_tuple=None):
+    """
+    Calcola il valore corrente dell'indice per l'header con pesi DSRM+UCITS reali.
+    Se pesi_tuple non è fornita, usa equiponderato come fallback.
+    """
     import time as _t
     try:
         tickers_list = list(tickers_tuple)
@@ -536,8 +543,17 @@ def get_valore_header(tickers_tuple):
         if len(tickers_ok) < 2:
             return None, None, None
 
-        rend   = prezzi[tickers_ok].pct_change().dropna(how='all').fillna(0)
-        pesi_v = np.ones(len(tickers_ok)) / len(tickers_ok)
+        rend = prezzi[tickers_ok].pct_change().dropna(how='all').fillna(0)
+
+        # Usa pesi reali DSRM+UCITS se disponibili
+        if pesi_tuple is not None:
+            pesi_dict = dict(pesi_tuple)
+            pesi_v = np.array([pesi_dict.get(t, 0.0) for t in tickers_ok], dtype=float)
+            tot = pesi_v.sum()
+            pesi_v = pesi_v / tot if tot > 0 else np.ones(len(tickers_ok)) / len(tickers_ok)
+        else:
+            pesi_v = np.ones(len(tickers_ok)) / len(tickers_ok)
+
         rend_g = pd.Series(rend[tickers_ok].values @ pesi_v, index=rend.index)
         idx_g  = (1 + rend_g).cumprod() * 100
 
@@ -549,7 +565,19 @@ def get_valore_header(tickers_tuple):
         return None, None, None
 
 _header_tickers = tuple(df_aziende['Ticker'].dropna().unique()) if not df_aziende.empty else ()
-_valore_idx, _delta_oggi, _delta_1w = get_valore_header(_header_tickers) if _header_tickers else (None, None, None)
+# Prepara pesi reali DSRM+UCITS per l'header (come tuple hashable per cache)
+if not df_aziende.empty and 'Peso_Effettivo' in df_aziende.columns:
+    _pesi_df = df_aziende[df_aziende['Ticker'].notna()][['Ticker', 'Peso_Effettivo']].copy()
+    _tot_pesi = _pesi_df['Peso_Effettivo'].sum()
+    if _tot_pesi > 0:
+        _pesi_header = tuple(zip(_pesi_df['Ticker'].tolist(),
+                                 (_pesi_df['Peso_Effettivo'] / _tot_pesi).tolist()))
+    else:
+        _pesi_header = None
+else:
+    _pesi_header = None
+
+_valore_idx, _delta_oggi, _delta_1w = get_valore_header(_header_tickers, _pesi_header) if _header_tickers else (None, None, None)
 
 # Costruisce il blocco indice per l'header
 if _valore_idx is not None:
@@ -737,6 +765,128 @@ def get_indice_live(tickers_tuple, bench="^GSPC", periodo="6mo"):
         return idx_g, idx_b, metriche
     except Exception:
         return None, None, None
+
+
+@st.cache_data(ttl=300)
+def get_indice_con_ribilanciamento(tickers_tuple, pesi_base_tuple, bench="^GSPC",
+                                   periodo="2y", buffer_antiturnover=0.15):
+    """
+    Costruisce la serie GGIV con ribilanciamento trimestrale reale (Rulebook 7-BIS).
+    - Ribilanciamento Q1/Q2/Q3/Q4 al primo lunedì del trimestre
+    - Buffer anti-turnover 15%: aggiorna i pesi solo se la deviazione > buffer
+    - DSRM applicato ai pesi base
+    Restituisce (serie_ggiv, serie_bench, metriche_dict, date_ribil_effettive)
+    """
+    import time as _time
+    try:
+        tickers_list = list(tickers_tuple)
+        pesi_dict    = dict(pesi_base_tuple)
+
+        # Download dati storici
+        for tentativo in range(3):
+            try:
+                raw = yf.download(tickers_list + [bench], period=periodo,
+                                  auto_adjust=True, progress=False)
+                if raw is not None and not raw.empty:
+                    break
+                _time.sleep(2 ** tentativo)
+            except Exception:
+                if tentativo < 2: _time.sleep(2 ** tentativo)
+        else:
+            return None, None, None, []
+
+        if isinstance(raw.columns, pd.MultiIndex):
+            if 'Close' not in raw.columns.get_level_values(0):
+                return None, None, None, []
+            prezzi = raw['Close']
+        else:
+            prezzi = raw[['Close']] if 'Close' in raw.columns else None
+            if prezzi is None:
+                return None, None, None, []
+
+        bench_serie = prezzi[bench].dropna() if bench in prezzi.columns else None
+        tickers_ok  = [t for t in tickers_list if t in prezzi.columns
+                       and prezzi[t].dropna().shape[0] > 10]
+        if len(tickers_ok) < 2 or bench_serie is None:
+            return None, None, None, []
+
+        # Normalizza pesi iniziali
+        pesi_curr = {t: pesi_dict.get(t, 0.0) for t in tickers_ok}
+        tot_p = sum(pesi_curr.values())
+        if tot_p <= 0:
+            pesi_curr = {t: 1/len(tickers_ok) for t in tickers_ok}
+        else:
+            pesi_curr = {t: v/tot_p for t, v in pesi_curr.items()}
+
+        rend = prezzi[tickers_ok].pct_change().dropna(how='all').fillna(0)
+        data_inizio = rend.index[0]
+        data_fine   = rend.index[-1]
+
+        # Date ribilanciamento: primo lunedì di Mar/Giu/Set/Dic
+        def primo_lunedi(anno, mese):
+            primo = pd.Timestamp(anno, mese, 1)
+            giorni_al_lun = (7 - primo.weekday()) % 7
+            return pd.Timestamp(anno, mese, 1 + giorni_al_lun)
+
+        date_rib_target = []
+        for anno in range(data_inizio.year, data_fine.year + 1):
+            for mese in [3, 6, 9, 12]:
+                d = primo_lunedi(anno, mese)
+                if data_inizio < d < data_fine:
+                    date_rib_target.append(d)
+        set_date_rib = set(date_rib_target)
+
+        # Costruisce serie con ribilanciamento e drift naturale
+        rendimenti_portafoglio = []
+        date_ribil_effettive   = []
+        pesi_v_curr = np.array([pesi_curr[t] for t in tickers_ok])
+        pesi_target = np.array([pesi_dict.get(t, 0.0) for t in tickers_ok])
+        tot_t = pesi_target.sum()
+        if tot_t > 0:
+            pesi_target = pesi_target / tot_t
+
+        for data, riga in rend.iterrows():
+            # Ribilanciamento trimestrale con buffer anti-turnover
+            if any(abs((data - dr).days) <= 3 for dr in date_rib_target):
+                deviazione_max = np.abs(pesi_v_curr - pesi_target).max()
+                if deviazione_max > buffer_antiturnover:
+                    pesi_v_curr = pesi_target.copy()
+                    date_ribil_effettive.append(data)
+
+            r = riga[tickers_ok].fillna(0).values
+            rend_giorno = float(r @ pesi_v_curr)
+            rendimenti_portafoglio.append(rend_giorno)
+
+            # Drift naturale: aggiorna pesi per la giornata successiva
+            nuovi = pesi_v_curr * (1 + r)
+            tot_n = nuovi.sum()
+            if tot_n > 0:
+                pesi_v_curr = nuovi / tot_n
+
+        serie_rend = pd.Series(rendimenti_portafoglio, index=rend.index)
+        idx_g = (1 + serie_rend).cumprod() * 100
+
+        bench_rend = bench_serie.pct_change().dropna().reindex(serie_rend.index).fillna(0)
+        idx_b = (1 + bench_rend).cumprod() * 100
+
+        ny   = max(len(serie_rend) / 252, 0.01)
+        cagr = (idx_g.iloc[-1] / 100) ** (1/ny) - 1
+        vol  = serie_rend.std() * np.sqrt(252)
+        sh   = (cagr - 0.035) / vol if vol > 0 else 0
+        dd   = ((idx_g - idx_g.cummax()) / idx_g.cummax()).min()
+        dv   = serie_rend[serie_rend < 0].std() * np.sqrt(252)
+        so   = (cagr - 0.035) / dv if dv > 0 else 0
+        delta_oggi = serie_rend.iloc[-1] * 100 if len(serie_rend) > 0 else 0
+
+        metriche = {
+            'cagr': cagr, 'vol': vol, 'sharpe': sh, 'sortino': so,
+            'max_dd': dd, 'valore': idx_g.iloc[-1], 'delta_oggi': delta_oggi,
+            'n_costituenti': len(tickers_ok),
+            'n_ribilanciamenti': len(date_ribil_effettive),
+        }
+        return idx_g, idx_b, metriche, date_ribil_effettive
+    except Exception:
+        return None, None, None, []
 
 
 def render_grafico_indice(idx_g, idx_b, metriche, altezza=400, titolo_extra=""):
@@ -1244,28 +1394,61 @@ with tab_watchlist:
             if c in df_wl.columns:
                 colonne_da_mostrare.append(c)
 
-        # Calcola stato "pronta" per ogni azienda
+        # ── Calcola GES minimo dei componenti attuali per buffer anti-turnover ──
+        ges_minimo_indice = None
+        buffer_pct = 15.0
+        if not df_aziende.empty and 'GES_Score' in df_aziende.columns:
+            ges_vals = pd.to_numeric(df_aziende['GES_Score'], errors='coerce').dropna()
+            if not ges_vals.empty:
+                ges_minimo_indice = float(ges_vals.min())
+
+        # Calcola stato "pronta" + "superamento buffer" per ogni azienda
         df_wl_show = df_wl[colonne_da_mostrare].copy()
         df_wl_show['_pronta'] = False
+        df_wl_show['_supera_buffer'] = False
+
         if 'Flag_Ammissione' in df_wl.columns and 'Giorni_Silenzio' in df_wl.columns:
             df_wl_show['_pronta'] = (
                 (df_wl['Flag_Ammissione'].astype(str).str.strip() == 'PASS') &
                 (df_wl['Giorni_Silenzio'] <= 45)
             )
+
+        # Buffer anti-turnover: candidata entra solo se GES > GES_min * (1 + 15%)
+        if ges_minimo_indice is not None and 'GES_Score' in df_wl.columns:
+            soglia_buffer = ges_minimo_indice * (1 + buffer_pct / 100)
+            ges_wl = pd.to_numeric(df_wl['GES_Score'], errors='coerce').fillna(0)
+            df_wl_show['_supera_buffer'] = ges_wl > soglia_buffer
+            df_wl_show['_pronta'] = df_wl_show['_pronta'] & df_wl_show['_supera_buffer']
+
         pronte = int(df_wl_show['_pronta'].sum())
 
         # KPI
-        cw1, cw2, cw3 = st.columns(3)
+        cw1, cw2, cw3, cw4 = st.columns(4)
         cw1.metric("IN OSSERVAZIONE", str(len(df_wl)), "aziende candidate")
-        cw2.metric("PRONTE PER INGRESSO", str(pronte), "PASS + DSRM verde")
+        cw2.metric("PRONTE PER INGRESSO", str(pronte), "PASS + DSRM verde + buffer 15%")
         n_fail_wl = int(df_wl['Flag_Ammissione'].astype(str).str.startswith('FAIL').sum()) if 'Flag_Ammissione' in df_wl.columns else 0
         cw3.metric("NON IDONEE", str(n_fail_wl), "non superano filtri")
+        if ges_minimo_indice is not None:
+            soglia_disp = ges_minimo_indice * (1 + buffer_pct/100)
+            cw4.metric("SOGLIA BUFFER GES", f"{soglia_disp:.4f}",
+                       f"GES min indice + {buffer_pct:.0f}%")
+        else:
+            cw4.metric("BUFFER ANTI-TURNOVER", f"{buffer_pct:.0f}%", "Rulebook 7-BIS.4")
 
         # Alert pronte subito visibili
         if pronte > 0:
             df_pronte = df_wl_show[df_wl_show['_pronta']]
             nomi_pronti = ", ".join(df_pronte['Azienda'].tolist())
             st.success(f"✅ {pronte} aziende pronte per valutazione Index Committee: **{nomi_pronti}**")
+        elif ges_minimo_indice is not None:
+            n_pass_dsrm = int(
+                (df_wl_show['Flag_Ammissione'].astype(str).str.strip() == 'PASS').sum()
+                if 'Flag_Ammissione' in df_wl_show.columns else 0
+            )
+            n_no_buffer = int((~df_wl_show['_supera_buffer']).sum()) if '_supera_buffer' in df_wl_show.columns else 0
+            if n_pass_dsrm > 0 and n_no_buffer > 0:
+                st.info(f"ℹ️ {n_pass_dsrm} aziende PASS ma nessuna supera il buffer anti-turnover "
+                        f"(GES >{ges_minimo_indice*(1+buffer_pct/100):.4f}). Buffer Rulebook 7-BIS.4 attivo.")
 
         # Controlli filtro + ordinamento
         fc1, fc2, fc3 = st.columns([1, 1, 2])
@@ -1343,31 +1526,59 @@ with tab_backtest:
             key='periodo_bt'
         )
 
-        with st.spinner("Scaricando serie storica reale..."):
-            idx_g_bt, idx_b_bt, met_bt = get_indice_live(tickers_bt_live, periodo=periodo_bt)
+        with st.spinner("Scaricando serie storica con ribilanciamento trimestrale reale..."):
+            # Prepara pesi base DSRM+UCITS come tuple hashable
+            if not df_aziende.empty and 'Peso_Effettivo' in df_aziende.columns:
+                _df_pb = df_aziende[df_aziende['Ticker'].notna()][['Ticker','Peso_Effettivo']].copy()
+                _tot_pb = _df_pb['Peso_Effettivo'].sum()
+                if _tot_pb > 0:
+                    _pesi_bt = tuple(zip(_df_pb['Ticker'].tolist(),
+                                        (_df_pb['Peso_Effettivo'] / _tot_pb).tolist()))
+                else:
+                    _pesi_bt = tuple((t, 1/len(tickers_bt_live)) for t in tickers_bt_live)
+            else:
+                _pesi_bt = tuple((t, 1/len(tickers_bt_live)) for t in tickers_bt_live)
+
+            idx_g_bt, idx_b_bt, met_bt, date_ribil_eff = get_indice_con_ribilanciamento(
+                tickers_bt_live, _pesi_bt, periodo=periodo_bt
+            )
+            # Fallback a versione senza ribilanciamento se fallisce
+            if idx_g_bt is None:
+                idx_g_bt, idx_b_bt, met_bt = get_indice_live(tickers_bt_live, periodo=periodo_bt)
+                date_ribil_eff = []
+                met_bt = met_bt or {}
 
         if idx_g_bt is not None:
-            # KPI
-            kb1, kb2, kb3, kb4, kb5 = st.columns(5)
-            kb1.metric("CAGR",      f"{met_bt['cagr']*100:+.2f}%",  "annualizzato")
-            kb2.metric("SHARPE",    f"{met_bt['sharpe']:.2f}",       "rf=3.5%")
-            kb3.metric("MAX DD",    f"{met_bt['max_dd']*100:.2f}%",  "drawdown massimo")
-            kb4.metric("VOL ANNUA", f"{met_bt['vol']*100:.1f}%",     "rendimenti giornalieri")
-            kb5.metric("N. TICKER", str(met_bt['n_costituenti']),    "con dati disponibili")
+            # KPI con ribilanciamento reale
+            kb1, kb2, kb3, kb4, kb5, kb6 = st.columns(6)
+            kb1.metric("CAGR",        f"{met_bt['cagr']*100:+.2f}%",  "annualizzato")
+            kb2.metric("SHARPE",      f"{met_bt['sharpe']:.2f}",       "rf=3.5%")
+            kb3.metric("SORTINO",     f"{met_bt.get('sortino', 0):.2f}", "downside risk")
+            kb4.metric("MAX DD",      f"{met_bt['max_dd']*100:.2f}%",  "drawdown massimo")
+            kb5.metric("VOL ANNUA",   f"{met_bt['vol']*100:.1f}%",     "rendimenti giornalieri")
+            kb6.metric("RIBILANC.",   str(met_bt.get('n_ribilanciamenti', '—')),
+                       f"{met_bt['n_costituenti']} ticker · buffer 15%")
 
-            # Date ribilanciamenti trimestrali nel periodo
-            date_ribil = pd.date_range(
+            # Date ribilanciamenti effettivi nel periodo
+            fig_bt2 = render_grafico_indice(idx_g_bt, idx_b_bt, met_bt, altezza=420)
+            # Linee ribilanciamenti effettivi (oro pieno) vs target (oro tratteggiato)
+            date_rib_target = pd.date_range(
                 start=idx_g_bt.index[0], end=idx_g_bt.index[-1], freq='QS'
             )
-
-            fig_bt2 = render_grafico_indice(idx_g_bt, idx_b_bt, met_bt, altezza=420)
-            # Aggiungi linee ribilanciamento
-            for dr in date_ribil:
+            for dr in date_rib_target:
                 fig_bt2.add_vline(
-                    x=dr, line=dict(color='#c9a84c', width=0.8, dash='dot'),
+                    x=dr, line=dict(color='#c9a84c', width=0.6, dash='dot'),
+                )
+            for dr in (date_ribil_eff or []):
+                fig_bt2.add_vline(
+                    x=dr, line=dict(color='#c9a84c', width=1.5, dash='solid'),
                 )
             fig_bt2.add_trace(go.Scatter(
-                x=[None], y=[None], mode='lines', name='Ribilanciamento Q',
+                x=[None], y=[None], mode='lines', name='Ribilanciamento effettivo',
+                line=dict(color='#c9a84c', width=1.5, dash='solid')
+            ))
+            fig_bt2.add_trace(go.Scatter(
+                x=[None], y=[None], mode='lines', name='Data target Q trimestrale',
                 line=dict(color='#c9a84c', width=0.8, dash='dot')
             ))
             # Drawdown
@@ -1389,10 +1600,12 @@ with tab_backtest:
                 )
             })
             st.plotly_chart(fig_bt2, use_container_width=True)
+            n_rib_eff = len(date_ribil_eff) if date_ribil_eff else 0
             st.caption(
-                f"Le linee verticali dorate indicano i ribilanciamenti trimestrali. "
-                f"Area rossa = drawdown GGIV. "
-                f"Dati reali da Yahoo Finance — {met_bt['n_costituenti']} costituenti."
+                f"Ribilanciamento trimestrale reale (Rulebook 7-BIS) · "
+                f"{n_rib_eff} ribilanciamenti effettivi (buffer anti-turnover 15%) · "
+                f"Linee dorate piene = ribilanciamento eseguito · tratteggio = data target · "
+                f"Area rossa = drawdown GGIV · {met_bt['n_costituenti']} costituenti."
             )
         else:
             st.warning("Impossibile scaricare i dati storici. Controlla la connessione.")
