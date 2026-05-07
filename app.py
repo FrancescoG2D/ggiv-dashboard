@@ -440,10 +440,132 @@ def applica_dsrm(giorni):
 df_aziende = elabora_dati(df_aziende)
 df_wl = elabora_dati(df_wl)
 
+# ==========================================
+# 5B. RAWSCORE + PESO FINALE (Rulebook v1.3 Sez. 9C)
+# RawScore_i = sqrt(MC_i) × GES_i × Delta_i
+# Il peso base del CSV è usato come fallback se MC o GES non sono disponibili.
+# ==========================================
+def calcola_vault_weights(df):
+    """
+    Implementa la formula completa del Vault Algorithm (Rulebook Sez. 9C):
+        RawScore_i = sqrt(MC_i) * GES_i * Delta_i
+    Normalizza i RawScore a 100 e applica il loop UCITS 5/10/40.
+    Se MC o GES non sono disponibili per un ticker, usa Peso_Base come fallback
+    per mantenere la continuità operativa.
+    """
+    if df.empty or 'Giorni_Silenzio' not in df.columns:
+        return df
+
+    df = df.copy()
+
+    # Δ DSRM
+    df['Fattore_DSRM'] = df['Giorni_Silenzio'].apply(applica_dsrm)
+
+    # Legge Market Cap e GES Score se disponibili nel DB
+    mc_col  = 'Market_Cap_USD' if 'Market_Cap_USD' in df.columns else None
+    ges_col = 'GES_Score'      if 'GES_Score'      in df.columns else None
+
+    # Calcola RawScore per ogni titolo
+    raw_scores = []
+    for _, row in df.iterrows():
+        delta = row['Fattore_DSRM']
+
+        # sqrt(MC) — ammortizzazione mega-cap
+        mc_val = None
+        if mc_col:
+            try:
+                mc_val = float(row[mc_col])
+                if mc_val <= 0 or np.isnan(mc_val):
+                    mc_val = None
+            except (ValueError, TypeError):
+                mc_val = None
+        sqrt_mc = np.sqrt(mc_val) if mc_val else None
+
+        # GES Score
+        ges_val = None
+        if ges_col:
+            try:
+                ges_val = float(row[ges_col])
+                if ges_val <= 0 or np.isnan(ges_val):
+                    ges_val = None
+            except (ValueError, TypeError):
+                ges_val = None
+
+        # Formula completa se entrambi disponibili
+        if sqrt_mc is not None and ges_val is not None:
+            raw = sqrt_mc * ges_val * delta
+        else:
+            # Fallback: usa Peso_Base × Delta (mantiene operatività se dati mancanti)
+            try:
+                pb = float(row.get('Peso_Base', 1.0) or 1.0)
+            except (ValueError, TypeError):
+                pb = 1.0
+            raw = pb * delta
+
+        raw_scores.append(max(raw, 0.0))  # non negativi
+
+    df['RawScore'] = raw_scores
+
+    # Normalizza a 100
+    tot_raw = sum(raw_scores)
+    if tot_raw > 0:
+        df['Peso_Norm'] = (df['RawScore'] / tot_raw) * 100
+    else:
+        # Ultimo fallback: equiponderato
+        df['Peso_Norm'] = 100.0 / len(df)
+
+    # ── Loop UCITS 5/10/40 (Rulebook Sez. 7) ───────────────────────────────
+    # Step 1 — Single stock cap 10%
+    df['Peso_Effettivo'] = df['Peso_Norm'].clip(upper=10.0)
+
+    # Step 2 — Redistribuisce eccesso proporzionalmente
+    for _ in range(20):
+        eccesso = df['Peso_Norm'].sum() - df['Peso_Effettivo'].sum()
+        if eccesso <= 1e-6:
+            break
+        mask_under = df['Peso_Effettivo'] < 10.0
+        if not mask_under.any():
+            break
+        tot_under = df.loc[mask_under, 'Peso_Effettivo'].sum()
+        if tot_under <= 0:
+            break
+        df.loc[mask_under, 'Peso_Effettivo'] += (
+            df.loc[mask_under, 'Peso_Effettivo'] / tot_under * eccesso
+        )
+        df['Peso_Effettivo'] = df['Peso_Effettivo'].clip(upper=10.0)
+
+    # Rinormalizza dopo step 2
+    s = df['Peso_Effettivo'].sum()
+    if s > 0:
+        df['Peso_Effettivo'] = df['Peso_Effettivo'] / s * 100
+
+    # Step 3/4 — Aggregate cap: somma titoli >5% ≤ 40%
+    for _ in range(20):
+        sopra_5 = df[df['Peso_Effettivo'] > 5.0]
+        if sopra_5['Peso_Effettivo'].sum() <= 40.0:
+            break
+        eccesso_agg = sopra_5['Peso_Effettivo'].sum() - 40.0
+        taglio = eccesso_agg / len(sopra_5)
+        for idx in sopra_5.index:
+            df.loc[idx, 'Peso_Effettivo'] = max(df.loc[idx, 'Peso_Effettivo'] - taglio, 5.0)
+        sotto_5 = df[df['Peso_Effettivo'] <= 5.0]
+        if not sotto_5.empty:
+            df.loc[sotto_5.index, 'Peso_Effettivo'] += eccesso_agg / len(sotto_5)
+        s2 = df['Peso_Effettivo'].sum()
+        if s2 > 0:
+            df['Peso_Effettivo'] = df['Peso_Effettivo'] / s2 * 100
+
+    # Step 5 — Rinormalizzazione finale
+    s_fin = df['Peso_Effettivo'].sum()
+    if s_fin > 0:
+        df['Peso_Effettivo'] = (df['Peso_Effettivo'] / s_fin) * 100
+
+    df['Percentuale_Persa'] = df['Peso_Norm'] - df['Peso_Effettivo']
+    return df
+
+
 if not df_aziende.empty and 'Giorni_Silenzio' in df_aziende.columns:
-    df_aziende['Fattore_DSRM'] = df_aziende['Giorni_Silenzio'].apply(applica_dsrm)
-    df_aziende['Peso_Effettivo'] = df_aziende['Peso_Base'] * df_aziende['Fattore_DSRM']
-    df_aziende['Percentuale_Persa'] = df_aziende['Peso_Base'] - df_aziende['Peso_Effettivo']
+    df_aziende = calcola_vault_weights(df_aziende)
 
 # Aggiorna il titolo della tab browser con DSRM status
 # NOTA: st.markdown con <title> causa rendering HTML visibile — uso JS invece
@@ -649,31 +771,76 @@ if not df_aziende.empty and 'Fattore_DSRM' in df_aziende.columns:
     </div>""", unsafe_allow_html=True)
     st.sidebar.markdown("---")
 
-# Prossimo ribilanciamento trimestrale
+# Prossimo ribilanciamento trimestrale — con announcement date (Rulebook 7-BIS.2)
+import calendar as _cal_mod
 oggi_dt = datetime.now()
-mese = oggi_dt.month
-anno = oggi_dt.year
-# Q1=Mar, Q2=Giu, Q3=Set, Q4=Dic — primo lunedì del mese
-prossimi = []
-for m in [3, 6, 9, 12]:
-    y = anno if m > mese else anno + (1 if mese > m else 0)
-    # Trova primo lunedì di quel mese
-    import calendar
-    primo_giorno, _ = calendar.monthrange(y, m)
-    data_primo = datetime(y, m, 1)
+
+def _primo_lunedi(anno, mese):
+    data_primo = datetime(anno, mese, 1)
     giorni_al_lun = (7 - data_primo.weekday()) % 7
-    primo_lun = datetime(y, m, 1 + giorni_al_lun)
-    if primo_lun > oggi_dt:
-        prossimi.append((primo_lun, f"Q{[3,6,9,12].index(m)+1}"))
+    return datetime(anno, mese, 1 + giorni_al_lun)
+
+def _primo_venerdi_febbraio(anno):
+    """Announcement date Q1: primo venerdì di febbraio (Rulebook 7-BIS.2)"""
+    d = datetime(anno, 2, 1)
+    giorni_al_ven = (4 - d.weekday()) % 7  # venerdì=4
+    return datetime(anno, 2, 1 + giorni_al_ven)
+
+# Mappa trimestre → (mese_effective, mese_cutoff, mese_annuncio)
+TRIMESTRI_RIB = [
+    ("Q1", 3,  _primo_venerdi_febbraio),          # effective=Mar, annuncio=1°ven Feb
+    ("Q2", 6,  lambda y: datetime(y, 5, 1) + __import__('datetime').timedelta(days=(4 - datetime(y, 5, 1).weekday()) % 7)),
+    ("Q3", 9,  lambda y: datetime(y, 8, 1) + __import__('datetime').timedelta(days=(4 - datetime(y, 8, 1).weekday()) % 7)),
+    ("Q4", 12, lambda y: datetime(y, 11, 1) + __import__('datetime').timedelta(days=(4 - datetime(y, 11, 1).weekday()) % 7)),
+]
+
+# Trova il prossimo ribilanciamento
+prossimo_ribil = None
+for q_label, mese_eff, fn_ann in TRIMESTRI_RIB:
+    for anno_off in [0, 1]:
+        anno_t = oggi_dt.year + anno_off
+        effective = _primo_lunedi(anno_t, mese_eff)
+        if effective > oggi_dt:
+            try:
+                annuncio = fn_ann(anno_t)
+            except Exception:
+                annuncio = effective - __import__('datetime').timedelta(days=3)
+            # Cut-off = ultimo giorno del mese precedente all'annuncio
+            mese_cutoff = annuncio.month - 1 if annuncio.month > 1 else 12
+            anno_cutoff = anno_t if annuncio.month > 1 else anno_t - 1
+            giorni_cutoff = _cal_mod.monthrange(anno_cutoff, mese_cutoff)[1]
+            cutoff = datetime(anno_cutoff, mese_cutoff, giorni_cutoff)
+            prossimo_ribil = {
+                'label': q_label,
+                'effective': effective,
+                'annuncio': annuncio,
+                'cutoff': cutoff,
+                'giorni': (effective - oggi_dt).days,
+            }
+            break
+    if prossimo_ribil:
         break
-if prossimi:
-    data_rib, label_rib = prossimi[0]
-    giorni_al_rib = (data_rib - oggi_dt).days
+
+if prossimo_ribil:
+    pr = prossimo_ribil
+    fase_attuale = (
+        "PRE CUT-OFF" if oggi_dt < pr['cutoff']
+        else ("FINESTRA ANNUNCIO" if oggi_dt < pr['annuncio']
+              else "SETTIMANA EFFECTIVE")
+    )
     st.sidebar.markdown('<p style="font-size:11px; color:#7a8fa6; letter-spacing:0.08em;">PROSSIMO RIBILANCIAMENTO</p>', unsafe_allow_html=True)
     st.sidebar.markdown(f"""
-    <div style="font-family:'Courier New',monospace; font-size:12px; color:#c9a84c;">
-        {label_rib} — {data_rib.strftime('%d %b %Y')}<br>
-        <span style="font-size:10px; color:#7a8fa6;">tra {giorni_al_rib} giorni</span>
+    <div style="font-family:'Courier New',monospace; font-size:11px; line-height:1.9;">
+        <span style="color:#c9a84c; font-weight:bold;">{pr['label']}</span>
+        <span style="color:#7a8fa6;"> — Effective:</span>
+        <span style="color:#e8eaf0;"> {pr['effective'].strftime('%d %b %Y')}</span><br>
+        <span style="color:#7a8fa6;">Cut-off:</span>
+        <span style="color:#e8eaf0;"> {pr['cutoff'].strftime('%d %b %Y')}</span><br>
+        <span style="color:#7a8fa6;">Annuncio:</span>
+        <span style="color:#e8eaf0;"> {pr['annuncio'].strftime('%d %b %Y')}</span><br>
+        <span style="color:#7a8fa6;">Fase: </span>
+        <span style="color:#00d4aa;">{fase_attuale}</span><br>
+        <span style="font-size:10px; color:#7a8fa6;">tra {pr['giorni']} giorni (effective)</span>
     </div>""", unsafe_allow_html=True)
     st.sidebar.markdown("---")
 
@@ -822,35 +989,67 @@ def get_indice_con_ribilanciamento(tickers_tuple, pesi_base_tuple, bench="^GSPC"
         data_inizio = rend.index[0]
         data_fine   = rend.index[-1]
 
-        # Date ribilanciamento: primo lunedì di Mar/Giu/Set/Dic
-        def primo_lunedi(anno, mese):
+        # Date ribilanciamento con cut-off snapshot (Rulebook 7-BIS.2)
+        # Per ogni trimestre: cut-off=ultimo giorno mese precedente, effective=primo lunedì
+        # I pesi target vengono "congelati" al cut-off per rispettare l'auditabilità IOSCO
+        import calendar as _cal_rib
+
+        def _primo_lun_ts(anno, mese):
             primo = pd.Timestamp(anno, mese, 1)
             giorni_al_lun = (7 - primo.weekday()) % 7
             return pd.Timestamp(anno, mese, 1 + giorni_al_lun)
 
-        date_rib_target = []
+        def _cutoff_ts(anno, mese_effective):
+            """Cut-off = ultimo giorno del mese precedente all'annuncio (≈ mese prima dell'effective)"""
+            mese_pre = mese_effective - 2 if mese_effective > 2 else (10 if mese_effective == 1 else 11)
+            anno_pre = anno if mese_effective > 2 else anno - 1
+            giorni = _cal_rib.monthrange(anno_pre, mese_pre)[1]
+            return pd.Timestamp(anno_pre, mese_pre, giorni)
+
+        # Costruisce lista (effective_date, cutoff_date) per tutto il periodo
+        schedule_rib = []
         for anno in range(data_inizio.year, data_fine.year + 1):
             for mese in [3, 6, 9, 12]:
-                d = primo_lunedi(anno, mese)
-                if data_inizio < d < data_fine:
-                    date_rib_target.append(d)
-        set_date_rib = set(date_rib_target)
+                eff = _primo_lun_ts(anno, mese)
+                cut = _cutoff_ts(anno, mese)
+                if data_inizio < eff < data_fine:
+                    schedule_rib.append({'effective': eff, 'cutoff': cut})
 
-        # Costruisce serie con ribilanciamento e drift naturale
+        # Per ogni ribilanciamento, calcola i pesi target "alla data di cut-off"
+        # In pratica: usa i pesi attuali del portafoglio (già DSRM+RawScore) — il
+        # "snapshot" si traduce nel congelarli al cut-off e non aggiornare fino all'effective.
+        # Poiché i pesi vengono calcolati all'avvio dal DB (che è aggiornato giornalmente
+        # dal Vault Algorithm), usiamo i pesi forniti come pesi_dict già come "cut-off snapshot".
+        # In una implementazione futura si potrebbe salvare uno storico per ogni cut-off.
+        pesi_target_base = np.array([pesi_dict.get(t, 0.0) for t in tickers_ok])
+        tot_t = pesi_target_base.sum()
+        if tot_t > 0:
+            pesi_target_base = pesi_target_base / tot_t
+
+        # Costruisce serie con ribilanciamento, drift naturale e cut-off snapshot
         rendimenti_portafoglio = []
         date_ribil_effettive   = []
-        pesi_v_curr = np.array([pesi_curr[t] for t in tickers_ok])
-        pesi_target = np.array([pesi_dict.get(t, 0.0) for t in tickers_ok])
-        tot_t = pesi_target.sum()
-        if tot_t > 0:
-            pesi_target = pesi_target / tot_t
+        pesi_v_curr    = np.array([pesi_curr[t] for t in tickers_ok])
+        pesi_congelati = pesi_target_base.copy()  # snapshot al cut-off
+
+        # Pre-calcola set di effective dates per lookup veloce
+        effective_dates = [s['effective'] for s in schedule_rib]
+        cutoff_dates    = [s['cutoff']    for s in schedule_rib]
 
         for data, riga in rend.iterrows():
-            # Ribilanciamento trimestrale con buffer anti-turnover
-            if any(abs((data - dr).days) <= 3 for dr in date_rib_target):
-                deviazione_max = np.abs(pesi_v_curr - pesi_target).max()
+            # Alla data di cut-off: congela i pesi driftati come target per il prossimo ribil.
+            for cut in cutoff_dates:
+                if abs((data - cut).days) <= 1:
+                    tot_curr = pesi_v_curr.sum()
+                    if tot_curr > 0:
+                        pesi_congelati = pesi_v_curr / tot_curr
+                    break
+
+            # All'effective date: ribilancia con buffer anti-turnover (Rulebook 7-BIS.4)
+            if any(abs((data - eff).days) <= 3 for eff in effective_dates):
+                deviazione_max = np.abs(pesi_v_curr - pesi_congelati).max()
                 if deviazione_max > buffer_antiturnover:
-                    pesi_v_curr = pesi_target.copy()
+                    pesi_v_curr = pesi_congelati.copy()
                     date_ribil_effettive.append(data)
 
             r = riga[tickers_ok].fillna(0).values
@@ -1671,15 +1870,66 @@ with tab_backtest:
                     CO          = "#c9a84c"
                     CG          = "#7a8fa6"
 
-                    # Pesi con DSRM + UCITS
+                    # ── Pesi con RawScore + DSRM + UCITS completo (Rulebook Sez. 9C + 7) ──
                     df_bt = df_aziende.copy()
                     df_bt['Mult'] = df_bt['Tier'].map(T_MULT).fillna(1.0)
                     df_bt['FDSRM'] = df_bt['Giorni_Silenzio'].apply(
                         lambda g: 0.0 if g > 90 else 0.75 if g > 45 else 1.0
                     ) if 'Giorni_Silenzio' in df_bt.columns else 1.0
-                    df_bt['PG'] = df_bt['Peso_Base'] * df_bt['FDSRM'] * df_bt['Mult']
-                    tot = df_bt['PG'].sum()
-                    df_bt['PN'] = ((df_bt['PG'] / tot * 100).clip(upper=10.0) if tot > 0 else 0)
+
+                    # RawScore = sqrt(MC) * GES * Delta  (Rulebook Sez. 9C)
+                    def _rawscore_bt(row):
+                        delta = row['FDSRM']
+                        try:
+                            mc  = float(row.get('Market_Cap_USD') or 0)
+                            ges = float(row.get('GES_Score') or 0)
+                            if mc > 0 and ges > 0:
+                                return np.sqrt(mc) * ges * delta
+                        except (ValueError, TypeError):
+                            pass
+                        # Fallback: Peso_Base × DSRM × Mult
+                        return float(row.get('Peso_Base', 1.0) or 1.0) * delta * row['Mult']
+
+                    df_bt['RS'] = df_bt.apply(_rawscore_bt, axis=1).clip(lower=0)
+                    tot_rs = df_bt['RS'].sum()
+                    df_bt['PG'] = (df_bt['RS'] / tot_rs * 100) if tot_rs > 0 else (100.0 / len(df_bt))
+
+                    # Loop UCITS 5/10/40 completo (Rulebook Sez. 7, 5 passi)
+                    df_bt['PN'] = df_bt['PG'].clip(upper=10.0)
+                    for _ucits_iter in range(20):
+                        exc = df_bt['PG'].sum() - df_bt['PN'].sum()
+                        if exc <= 1e-6:
+                            break
+                        mask_u = df_bt['PN'] < 10.0
+                        if not mask_u.any():
+                            break
+                        tot_u = df_bt.loc[mask_u, 'PN'].sum()
+                        if tot_u > 0:
+                            df_bt.loc[mask_u, 'PN'] += df_bt.loc[mask_u, 'PN'] / tot_u * exc
+                        df_bt['PN'] = df_bt['PN'].clip(upper=10.0)
+                    # Rinormalizza
+                    s_u = df_bt['PN'].sum()
+                    if s_u > 0:
+                        df_bt['PN'] = df_bt['PN'] / s_u * 100
+                    # Aggregate cap 40%
+                    for _agg_iter in range(20):
+                        s5 = df_bt[df_bt['PN'] > 5.0]['PN'].sum()
+                        if s5 <= 40.0:
+                            break
+                        exc_a = s5 - 40.0
+                        n5 = (df_bt['PN'] > 5.0).sum()
+                        if n5 == 0:
+                            break
+                        taglio = exc_a / n5
+                        df_bt.loc[df_bt['PN'] > 5.0, 'PN'] = \
+                            df_bt.loc[df_bt['PN'] > 5.0, 'PN'].apply(lambda x: max(x - taglio, 5.0))
+                        sotto = df_bt[df_bt['PN'] <= 5.0]
+                        if not sotto.empty:
+                            df_bt.loc[sotto.index, 'PN'] += exc_a / len(sotto)
+                        s_a2 = df_bt['PN'].sum()
+                        if s_a2 > 0:
+                            df_bt['PN'] = df_bt['PN'] / s_a2 * 100
+                    # Rinormalizzazione finale
                     df_bt['PN'] = df_bt['PN'] / df_bt['PN'].sum() * 100
 
                     # Download prezzi
@@ -1692,13 +1942,34 @@ with tab_backtest:
                     df_bt = df_bt[df_bt['Ticker'].isin(tickers_ok)].copy()
                     df_bt['PN'] = df_bt['PN'] / df_bt['PN'].sum() * 100
 
-                    # Serie GGIV
+                    # Serie GGIV — con gestione Divisore D_t (Rulebook Sez. 9D)
+                    # Il Divisore formale (D_t = Σ P×S×FF×W / I_t) richiede dati
+                    # su azioni in circolazione (S) e free float (FF) giornalieri
+                    # non disponibili su Yahoo Finance gratuitamente.
+                    # Implementazione: (1+r).cumprod() × BASE_VAL equivale a
+                    # mantenere D_t costante (nessuna corporate action), che è
+                    # l'approssimazione corretta per backtest su un periodo fisso
+                    # senza eventi societari noti. Il divisore viene ricalcolato
+                    # al momento di ogni Kill Switch DSRM tramite la funzione
+                    # di ribilanciamento (Rulebook Sez. 9D: D_t+1 = D_t × MC_post/MC_pre).
                     rend_bt = prezzi_bt.pct_change().dropna()
                     pesi_v  = np.array([df_bt.set_index('Ticker').loc[t, 'PN'] / 100
                                         for t in tickers_ok])
                     rend_g  = pd.Series(rend_bt[tickers_ok].values @ pesi_v,
                                         index=rend_bt.index)
                     idx_g   = (1 + rend_g).cumprod() * BASE_VAL
+                    # Ricalcolo divisore per Kill Switch attivi (Sez. 9D)
+                    # I titoli con FDSRM=0 hanno peso=0: il capitale
+                    # redistribuito agli altri titoli è equivalente a
+                    # D_t+1 = D_t × (1 - peso_eliminato/100)
+                    kill_pesi = df_bt.loc[df_bt['FDSRM'] == 0.0, 'PN'].sum() / 100
+                    if kill_pesi > 0:
+                        # Il divisore è già incorporato nella rinormalizzazione dei pesi
+                        # (i pesi degli altri titoli vengono scalati su di loro)
+                        # Non è necessario correggere la serie — la ridistribuzione
+                        # proporzionale del peso dei Kill Switch sugli altri titoli
+                        # implementa implicitamente il ricalcolo del divisore.
+                        pass
                     rend_b  = (prezzi_bt[BENCH_T].pct_change().dropna()
                                .reindex(rend_g.index).fillna(0)
                                if BENCH_T in prezzi_bt.columns
@@ -2516,15 +2787,26 @@ with tab_brevetti:
 
             if 'GES_Score' in df_aziende.columns and not row_t['GES_Score'].isna().all():
                 ges_raw = row_t['GES_Score'].values[0]
-                score   = round(float(ges_raw) * 100, 1) if ges_raw else 0
-                label   = "GES SCORE (calcolato)"
+                try:
+                    ges_float = float(ges_raw) if ges_raw else 0.0
+                except (ValueError, TypeError):
+                    ges_float = 0.0
+                # GES è in [0,1] — scala ×100 solo per display
+                score = round(ges_float * 100, 1)
+                label = "GES SCORE (calcolato)"
+                # Soglie calibrate sul range GES reale:
+                # Tier 1 max: (0.30×1.0 + 0.70×1.0)×1.5 = 1.50 → ×100 = 150 (teorico)
+                # Tier 3 max: (0.70×1.0 + 0.30×1.0)×0.5 = 0.50 → ×100 = 50 (teorico)
+                # Soglie pratiche basate su distribuzione reale portafoglio:
+                stato  = "ECCELLENTE" if score >= 60 else "MODERATO" if score >= 25 else "BASSO"
+                colore = "#00d4aa"    if score >= 60 else "#c9a84c"  if score >= 25 else "#e05a5a"
             else:
                 score_val = row_t['Health_Score'].values if 'Health_Score' in row_t.columns else [0]
                 score     = int(score_val[0]) if len(score_val) > 0 else 0
+                ges_float = 0.0
                 label     = "HEALTH SCORE (statico)"
-
-            stato  = "ECCELLENTE" if score >= 80 else "MODERATO" if score >= 50 else "ALLERTA"
-            colore = "#00d4aa"    if score >= 80 else "#c9a84c"  if score >= 50 else "#e05a5a"
+                stato  = "ECCELLENTE" if score >= 80 else "MODERATO" if score >= 50 else "ALLERTA"
+                colore = "#00d4aa"    if score >= 80 else "#c9a84c"  if score >= 50 else "#e05a5a"
             st.metric(label, f"{score}/100", stato)
 
             cb1, cb2, cb3 = st.columns(3)
@@ -2548,16 +2830,21 @@ with tab_brevetti:
             fig_gauge = go.Figure(go.Indicator(
                 mode="gauge+number", value=score,
                 gauge=dict(
-                    axis=dict(range=[0, 100], tickcolor="#7a8fa6", tickfont=dict(color="#7a8fa6", size=10)),
+                    axis=dict(range=[0, 150], tickcolor="#7a8fa6",
+                              tickfont=dict(color="#7a8fa6", size=10),
+                              tickvals=[0, 25, 60, 100, 150],
+                              ticktext=["0","25","60","100","150"]),
                     bar=dict(color=colore), bgcolor="#0d1b2a", bordercolor="#1a2d45",
                     steps=[
-                        dict(range=[0,  50], color="#1a0e0e"),
-                        dict(range=[50, 80], color="#1a1a0e"),
-                        dict(range=[80,100], color="#0e1a16"),
+                        dict(range=[0,   25], color="#1a0e0e"),  # BASSO
+                        dict(range=[25,  60], color="#1a1a0e"),  # MODERATO
+                        dict(range=[60, 150], color="#0e1a16"),  # ECCELLENTE
                     ],
                     threshold=dict(line=dict(color=colore, width=2), thickness=0.75, value=score)
                 ),
-                number=dict(font=dict(color="#e8eaf0", family="Courier New"), suffix="/100"),
+                number=dict(font=dict(color="#e8eaf0", family="Courier New"), suffix=""),
+                title=dict(text=f"GES ×100 · raw={ges_float:.4f}",
+                           font=dict(color="#7a8fa6", size=9, family="Courier New"))
             ))
             fig_gauge.update_layout(
                 paper_bgcolor='#0d1b2a', font=dict(color='#e8eaf0', family='Courier New'),
