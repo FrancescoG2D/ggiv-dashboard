@@ -1358,7 +1358,7 @@ with tab_overview:
     col2.metric("AZIENDE IN INDICE", str(n_aziende),
                 f"{n_kill} kill switch · {n_penaliz} penalizzati" if (n_kill+n_penaliz) > 0 else "tutte operative")
     col3.metric("GOLDEN SHIELD",     f"{peso_shield:.1f}%",
-                "✓ attivo" if peso_shield >= 30 else ("⚠ sotto target" if peso_shield >= 20 else "✗ insufficiente"))
+                "✓ attivo" if peso_shield >= 25 else ("⚠ sotto target" if peso_shield >= 10 else "✗ assente"))
     col4.metric("ULTIMO AGGIORNAMENTO", datetime.now().strftime("%d/%m %H:%M"), "da Google Sheet")
 
     st.markdown("<div style='margin-top:8px;'></div>", unsafe_allow_html=True)
@@ -2786,11 +2786,13 @@ with tab_rischio:
     peso_totale_shield = df_aziende[df_aziende['Tier'] == 'Tier 3']['Peso_Effettivo'].sum() if not df_aziende.empty else 0
     n_shield = int((df_aziende['Tier'] == 'Tier 3').sum()) if not df_aziende.empty else 0
 
-    # Con l'architettura intra-Tier, il Peso_Base del DB viene rispettato
-    # e il Tier 3 mantiene la quota definita nel database (~40%).
-    SHIELD_BLOCCO = 20.0   # blocco operatività — Shield gravemente insufficiente
-    SHIELD_WARN   = 30.0   # avviso — Shield sotto target DB
-    SHIELD_OK     = 30.0   # target raccomandato (corrisponde al Peso_Base DB)
+    # Soglie Golden Shield:
+    # - BLOCCO (<10%): emergenza reale, Shield quasi assente
+    # - WARNING (10–25%): sotto target, probabile DB non aggiornato o DSRM attivi
+    # - OK (≥25%): Shield operativo (il target DB è ~40%, ma UCITS e DSRM possono ridurlo)
+    SHIELD_BLOCCO = 10.0   # blocco operatività — Shield assente (emergenza)
+    SHIELD_WARN   = 25.0   # avviso — sotto target, verifica DB/DSRM
+    SHIELD_OK     = 25.0
 
     shield_strutturale = n_shield > 0 and peso_totale_shield >= SHIELD_BLOCCO
     blocco_scudo = peso_totale_shield < SHIELD_BLOCCO
@@ -2798,14 +2800,14 @@ with tab_rischio:
     if blocco_scudo:
         st.error(
             f"BLOCCO OPERATIVITÀ — Tier 3 al {peso_totale_shield:.1f}% "
-            f"(minimo: {SHIELD_BLOCCO:.0f}%). Verifica DSRM e dati DB."
+            f"(minimo assoluto: {SHIELD_BLOCCO:.0f}%). Shield assente — operazioni sospese."
         )
     elif peso_totale_shield < SHIELD_WARN:
         st.warning(
-            f"SHIELD SOTTO TARGET — Tier 3 al {peso_totale_shield:.1f}% "
-            f"(target DB: ~{SHIELD_OK:.0f}%). "
-            f"Verifica che i Peso_Base Tier 3 nel database siano corretti "
-            f"e che il Vault Algorithm sia stato eseguito di recente."
+            f"⚠ SHIELD SOTTO TARGET — Tier 3 al {peso_totale_shield:.1f}% "
+            f"(target: ~30–40%). Possibile causa: MC o GES mancanti nel DB "
+            f"(fallback Peso_Base attivo) oppure Kill Switch DSRM attivi. "
+            f"Esegui il Vault Algorithm Update Tool per aggiornare i dati."
         )
     else:
         st.success(f"GOLDEN SHIELD ATTIVO — Tier 3 al {peso_totale_shield:.1f}% · {n_shield} costituenti")
