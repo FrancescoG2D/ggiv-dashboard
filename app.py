@@ -685,73 +685,101 @@ for _name, _d in dati_indici.items():
 _ticker_js_str = "".join(_ticker_js_items)
 
 st.markdown(f"""
+<style>
+  #ggiv-main-header {{
+    position: fixed !important;
+    top: 0 !important; left: 0 !important;
+    width: 100vw !important; height: 52px !important;
+    background: #060910 !important;
+    border-bottom: 1px solid #1a2d45 !important;
+    z-index: 9999999 !important;
+    display: flex !important; align-items: center !important;
+    padding: 0 20px !important;
+    white-space: nowrap !important; overflow: hidden !important;
+    font-family: 'Inter','Segoe UI',system-ui,sans-serif !important;
+    box-sizing: border-box !important;
+  }}
+</style>
+""", unsafe_allow_html=True)
+
+# ── Costruisce HTML dell'header — dati già calcolati ────────────────────────
+def _build_header_html(idx_val, delta_oggi, dati_ticker):
+    parts = []
+
+    # Logo
+    parts.append(
+        '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;margin-right:20px">'
+        '<span style="font-size:16px;color:#c9a84c;line-height:1">⬡</span>'
+        '<span style="font-size:13px;font-weight:700;color:#c9a84c;letter-spacing:.12em">GGIV</span>'
+        '</div>'
+    )
+    parts.append('<div style="width:1px;height:28px;background:#1a3a5c;margin:0 20px;flex-shrink:0"></div>')
+
+    # Indice GGIV live
+    if idx_val is not None:
+        d_col  = "#00d4aa" if delta_oggi >= 0 else "#e05a5a"
+        d_sign = "+" if delta_oggi >= 0 else ""
+        parts.append(
+            '<div style="display:flex;align-items:baseline;gap:8px;flex-shrink:0;margin-right:20px">'
+            '<span style="font-size:9px;font-weight:600;color:#7a8fa6;letter-spacing:.12em;text-transform:uppercase">GGIV INDEX</span>'
+            f'<span style="font-size:18px;font-weight:600;color:#fff;letter-spacing:-.02em;font-variant-numeric:tabular-nums">{idx_val:.2f}</span>'
+            f'<span style="font-size:11px;font-weight:500;color:{d_col};font-variant-numeric:tabular-nums">{d_sign}{delta_oggi:.2f}%</span>'
+            '</div>'
+        )
+        parts.append('<div style="width:1px;height:28px;background:#1a3a5c;margin:0 20px;flex-shrink:0"></div>')
+
+    # Ticker macro
+    ticker_items = []
+    for name, d in dati_ticker.items():
+        cls  = "color:#00d4aa" if d['change_pct'] >= 0 else "color:#e05a5a"
+        sign = "+" if d['change_pct'] >= 0 else ""
+        ticker_items.append(
+            f'<span style="display:inline-flex;align-items:baseline;gap:5px;flex-shrink:0">'
+            f'<span style="font-size:10px;color:#7a8fa6;font-weight:500">{name}</span>'
+            f'<span style="font-size:12px;font-weight:600;color:#e8eaf0;font-variant-numeric:tabular-nums">{d["price"]:,.2f}</span>'
+            f'<span style="font-size:11px;{cls};font-variant-numeric:tabular-nums">{sign}{d["change_pct"]:.2f}%</span>'
+            f'</span>'
+        )
+    parts.append(
+        '<div style="display:flex;gap:28px;overflow:hidden;flex:1">'
+        + "".join(ticker_items)
+        + '</div>'
+    )
+
+    return "".join(parts)
+
+_header_inner = _build_header_html(_valore_idx, _delta_oggi or 0, dati_indici)
+
+# ── st.components.v1.html è l'unico modo garantito per eseguire JS ──────────
+# L'iframe comunica col parent tramite postMessage per iniettare l'header
+# direttamente nel DOM della pagina principale.
+import streamlit.components.v1 as _components
+
+_components.html(f"""
 <script>
 (function() {{
-    var HEADER_ID = 'ggiv-main-header';
-
-    // Rimuove header precedente se esiste (rerun)
-    var old = document.getElementById(HEADER_ID);
-    if (old) old.remove();
-
-    var h = document.createElement('div');
-    h.id = HEADER_ID;
-    h.style.cssText = [
-        'position:fixed','top:0','left:0','width:100vw','height:52px',
-        'background:#060910','border-bottom:1px solid #1a2d45',
-        'z-index:9999999','display:flex','align-items:center',
-        'padding:0 20px','white-space:nowrap','overflow:hidden','gap:0',
-        "font-family:'Inter','Segoe UI',system-ui,sans-serif"
-    ].join('!important;') + '!important';
-
-    var showIdx = {_show_idx_js};
-    var idxVal  = '{_idx_val_js}';
-    var dltVal  = '{_delta_val_js}';
-    var dltCol  = '{_delta_col_js}';
-
-    var inner = '';
-
-    // Logo
-    inner += '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;margin-right:20px">';
-    inner += '<span style="font-size:16px;color:#c9a84c;line-height:1">⬡</span>';
-    inner += '<span style="font-size:13px;font-weight:700;color:#c9a84c;letter-spacing:.12em">GGIV</span>';
-    inner += '</div>';
-
-    // Divider
-    inner += '<div style="width:1px;height:28px;background:#1a3a5c;margin:0 20px;flex-shrink:0"></div>';
-
-    // Blocco indice GGIV live
-    if (showIdx) {{
-        inner += '<div style="display:flex;align-items:baseline;gap:8px;flex-shrink:0;margin-right:20px">';
-        inner += '<span style="font-size:9px;font-weight:600;color:#7a8fa6;letter-spacing:.12em;text-transform:uppercase">GGIV INDEX</span>';
-        inner += '<span style="font-size:18px;font-weight:600;color:#fff;letter-spacing:-.02em;font-variant-numeric:tabular-nums">' + idxVal + '</span>';
-        inner += '<span style="font-size:11px;font-weight:500;color:' + dltCol + ';font-variant-numeric:tabular-nums">' + dltVal + '</span>';
-        inner += '</div>';
-        inner += '<div style="width:1px;height:28px;background:#1a3a5c;margin:0 20px;flex-shrink:0"></div>';
-    }}
-
-    // Ticker scroll
-    inner += '<div style="display:flex;gap:28px;overflow:hidden;flex:1">';
-    inner += '{_ticker_js_str}';
-    inner += '</div>';
-
-    h.innerHTML = inner;
-
-    // Inserisce nell'app Streamlit
-    function insertHeader() {{
-        var app = document.querySelector('[data-testid="stAppViewContainer"]')
-                  || document.querySelector('.main')
-                  || document.body;
-        app.insertBefore(h, app.firstChild);
-    }}
-
-    if (document.readyState === 'loading') {{
-        document.addEventListener('DOMContentLoaded', insertHeader);
-    }} else {{
-        insertHeader();
-    }}
+  var html = {repr(_header_inner)};
+  function inject() {{
+    var win = window.parent;
+    var doc = win.document;
+    var existing = doc.getElementById('ggiv-main-header');
+    if (existing) existing.remove();
+    var el = doc.createElement('div');
+    el.id = 'ggiv-main-header';
+    el.innerHTML = html;
+    var root = doc.querySelector('[data-testid="stAppViewContainer"]')
+               || doc.querySelector('section.main')
+               || doc.body;
+    root.insertBefore(el, root.firstChild);
+  }}
+  if (document.readyState === 'loading') {{
+    document.addEventListener('DOMContentLoaded', inject);
+  }} else {{
+    inject();
+  }}
 }})();
 </script>
-""", unsafe_allow_html=True)
+""", height=0, scrolling=False)
 
 # ==========================================
 # 7. SIDEBAR
