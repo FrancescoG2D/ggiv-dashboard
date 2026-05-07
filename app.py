@@ -51,104 +51,6 @@ st.markdown("""
         color: #00d4aa !important;
     }
 
-    /* --- HEADER FISSO STILE BLOOMBERG --- */
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-
-    .ggiv-header {
-        position: fixed !important;
-        top: 0 !important;
-        left: 0 !important;
-        width: 100vw !important;
-        height: 52px !important;
-        background-color: #060910 !important;
-        border-bottom: 1px solid #1a2d45 !important;
-        z-index: 9999999 !important;
-        display: flex !important;
-        align-items: center !important;
-        padding: 0 20px !important;
-        white-space: nowrap !important;
-        overflow: hidden !important;
-        gap: 0 !important;
-        font-family: 'Inter', 'Segoe UI', system-ui, sans-serif !important;
-    }
-
-    /* Logo GGIV — sinistra */
-    .ggiv-logo-block {
-        display: flex !important;
-        align-items: center !important;
-        gap: 6px !important;
-        flex-shrink: 0 !important;
-        margin-right: 20px !important;
-    }
-    .ggiv-hex {
-        font-size: 16px !important;
-        color: #c9a84c !important;
-        line-height: 1 !important;
-    }
-    .ggiv-name {
-        font-size: 13px !important;
-        font-weight: 700 !important;
-        color: #c9a84c !important;
-        letter-spacing: 0.12em !important;
-        font-family: 'Inter', sans-serif !important;
-    }
-
-    /* Blocco valore indice GGIV */
-    .ggiv-idx-block {
-        display: flex !important;
-        align-items: baseline !important;
-        gap: 8px !important;
-        flex-shrink: 0 !important;
-        margin-right: 20px !important;
-    }
-    .ggiv-idx-label {
-        font-size: 9px !important;
-        font-weight: 600 !important;
-        color: #7a8fa6 !important;
-        letter-spacing: 0.12em !important;
-        text-transform: uppercase !important;
-        font-family: 'Inter', sans-serif !important;
-    }
-    .ggiv-idx-value {
-        font-size: 18px !important;
-        font-weight: 600 !important;
-        color: #ffffff !important;
-        letter-spacing: -0.02em !important;
-        font-family: 'Inter', sans-serif !important;
-        font-variant-numeric: tabular-nums !important;
-    }
-    .ggiv-idx-delta {
-        font-size: 11px !important;
-        font-weight: 500 !important;
-        font-family: 'Inter', sans-serif !important;
-        font-variant-numeric: tabular-nums !important;
-    }
-
-    .ggiv-divider {
-        width: 1px !important;
-        height: 28px !important;
-        background: #1a3a5c !important;
-        margin: 0 20px !important;
-        flex-shrink: 0 !important;
-    }
-    .ticker-scroll {
-        display: flex !important;
-        gap: 28px !important;
-        overflow: hidden !important;
-        flex: 1 !important;
-    }
-    .t-item { display: inline-flex; align-items: baseline; gap: 5px; flex-shrink: 0; }
-    .t-name  { font-size: 10px; color: #7a8fa6; letter-spacing: 0.04em;
-                font-family: 'Inter', sans-serif; font-weight: 500; }
-    .t-price { font-size: 12px; font-weight: 600; color: #e8eaf0;
-                font-family: 'Inter', sans-serif; font-variant-numeric: tabular-nums; }
-    .t-up    { color: #00d4aa; font-size: 11px; font-family: 'Inter', sans-serif;
-                font-variant-numeric: tabular-nums; }
-    .t-down  { color: #e05a5a; font-size: 11px; font-family: 'Inter', sans-serif;
-                font-variant-numeric: tabular-nums; }
-    .t-main  { font-size: 13px; font-weight: bold; color: #c9a84c; margin-right: 32px;
-                flex-shrink: 0; letter-spacing: 0.08em; }
-
     /* --- TAB BAR --- */
     div[data-testid="stTabs"] > div:first-child {
         position: sticky !important;
@@ -748,37 +650,107 @@ else:
 
 _valore_idx, _delta_oggi, _delta_1w = get_valore_header(_header_tickers, _pesi_header) if _header_tickers else (None, None, None)
 
-# Costruisce il blocco indice per l'header
+# ── Header iniettato via JS puro — elimina il bug HTML visibile ──────────────
+# st.markdown con HTML grezzo può mostrare il sorgente come testo in alcuni
+# cicli di rendering React. La soluzione definitiva è costruire il DOM
+# direttamente via JavaScript: il nodo viene inserito nel <body> una sola
+# volta e aggiornato ad ogni rerun senza mai passare per il parser di Streamlit.
+
+# Prepara i dati per il JS
 if _valore_idx is not None:
-    _d_color  = "#00d4aa" if _delta_oggi >= 0 else "#e05a5a"
-    _d_sign   = "+" if _delta_oggi >= 0 else ""
-    _idx_html = f"""
-    <div class="ggiv-idx-block">
-        <span class="ggiv-idx-label">GGIV INDEX</span>
-        <span class="ggiv-idx-value">{_valore_idx:.2f}</span>
-        <span class="ggiv-idx-delta" style="color:{_d_color};">{_d_sign}{_delta_oggi:.2f}%</span>
-    </div>
-    <div class="ggiv-divider"></div>"""
+    _idx_val_js   = f"{_valore_idx:.2f}"
+    _delta_val_js = f"{'+'if _delta_oggi>=0 else ''}{_delta_oggi:.2f}%"
+    _delta_col_js = "#00d4aa" if _delta_oggi >= 0 else "#e05a5a"
+    _show_idx_js  = "true"
 else:
-    _idx_html = '<div class="ggiv-divider"></div>'
+    _idx_val_js   = ""
+    _delta_val_js = ""
+    _delta_col_js = "#7a8fa6"
+    _show_idx_js  = "false"
 
-def render_ticker_item(name, d):
-    cls = "t-up" if d['change_pct'] >= 0 else "t-down"
-    sign = "+" if d['change_pct'] >= 0 else ""
-    return f'<span class="t-item"><span class="t-name">{name}</span><span class="t-price">{d["price"]:,.2f}</span><span class="{cls}">{sign}{d["change_pct"]:.2f}%</span></span>'
+# Serializza ticker per JS
+_ticker_js_items = []
+for _name, _d in dati_indici.items():
+    _cls  = "t-up" if _d['change_pct'] >= 0 else "t-down"
+    _sign = "+" if _d['change_pct'] >= 0 else ""
+    _item = (
+        f'<span class="t-item">'
+        f'<span class="t-name">{_name}</span>'
+        f'<span class="t-price">{_d["price"]:,.2f}</span>'
+        f'<span class="{_cls}">{_sign}{_d["change_pct"]:.2f}%</span>'
+        f'</span>'
+    )
+    _ticker_js_items.append(_item.replace("'", "\\'").replace("\n", ""))
 
-ticker_html = ''.join([render_ticker_item(n, d) for n, d in dati_indici.items()])
+_ticker_js_str = "".join(_ticker_js_items)
 
 st.markdown(f"""
-<div class="ggiv-header">
-    <div class="ggiv-logo-block">
-        <span class="ggiv-hex">⬡</span>
-        <span class="ggiv-name">GGIV</span>
-    </div>
-    <div class="ggiv-divider"></div>
-    {_idx_html}
-    <div class="ticker-scroll">{ticker_html}</div>
-</div>
+<script>
+(function() {{
+    var HEADER_ID = 'ggiv-main-header';
+
+    // Rimuove header precedente se esiste (rerun)
+    var old = document.getElementById(HEADER_ID);
+    if (old) old.remove();
+
+    var h = document.createElement('div');
+    h.id = HEADER_ID;
+    h.style.cssText = [
+        'position:fixed','top:0','left:0','width:100vw','height:52px',
+        'background:#060910','border-bottom:1px solid #1a2d45',
+        'z-index:9999999','display:flex','align-items:center',
+        'padding:0 20px','white-space:nowrap','overflow:hidden','gap:0',
+        "font-family:'Inter','Segoe UI',system-ui,sans-serif"
+    ].join('!important;') + '!important';
+
+    var showIdx = {_show_idx_js};
+    var idxVal  = '{_idx_val_js}';
+    var dltVal  = '{_delta_val_js}';
+    var dltCol  = '{_delta_col_js}';
+
+    var inner = '';
+
+    // Logo
+    inner += '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;margin-right:20px">';
+    inner += '<span style="font-size:16px;color:#c9a84c;line-height:1">⬡</span>';
+    inner += '<span style="font-size:13px;font-weight:700;color:#c9a84c;letter-spacing:.12em">GGIV</span>';
+    inner += '</div>';
+
+    // Divider
+    inner += '<div style="width:1px;height:28px;background:#1a3a5c;margin:0 20px;flex-shrink:0"></div>';
+
+    // Blocco indice GGIV live
+    if (showIdx) {{
+        inner += '<div style="display:flex;align-items:baseline;gap:8px;flex-shrink:0;margin-right:20px">';
+        inner += '<span style="font-size:9px;font-weight:600;color:#7a8fa6;letter-spacing:.12em;text-transform:uppercase">GGIV INDEX</span>';
+        inner += '<span style="font-size:18px;font-weight:600;color:#fff;letter-spacing:-.02em;font-variant-numeric:tabular-nums">' + idxVal + '</span>';
+        inner += '<span style="font-size:11px;font-weight:500;color:' + dltCol + ';font-variant-numeric:tabular-nums">' + dltVal + '</span>';
+        inner += '</div>';
+        inner += '<div style="width:1px;height:28px;background:#1a3a5c;margin:0 20px;flex-shrink:0"></div>';
+    }}
+
+    // Ticker scroll
+    inner += '<div style="display:flex;gap:28px;overflow:hidden;flex:1">';
+    inner += '{_ticker_js_str}';
+    inner += '</div>';
+
+    h.innerHTML = inner;
+
+    // Inserisce nell'app Streamlit
+    function insertHeader() {{
+        var app = document.querySelector('[data-testid="stAppViewContainer"]')
+                  || document.querySelector('.main')
+                  || document.body;
+        app.insertBefore(h, app.firstChild);
+    }}
+
+    if (document.readyState === 'loading') {{
+        document.addEventListener('DOMContentLoaded', insertHeader);
+    }} else {{
+        insertHeader();
+    }}
+}})();
+</script>
 """, unsafe_allow_html=True)
 
 # ==========================================
