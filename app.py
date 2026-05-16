@@ -252,9 +252,9 @@ if not st.session_state.get('accesso_consentito', False):
                 return None, None
             rend  = prezzi[tickers_ok].pct_change().dropna(how='all').fillna(0)
             rend_g = rend.mean(axis=1)
-            idx_g  = (1 + rend_g).cumprod() * 100
+            idx_g  = (1 + rend_g).cumprod() * 1000
             bench_r = bench.pct_change().dropna().reindex(rend_g.index).fillna(0)
-            idx_b  = (1 + bench_r).cumprod() * 100
+            idx_b  = (1 + bench_r).cumprod() * 1000
             return idx_g, idx_b
         except Exception:
             return None, None
@@ -584,15 +584,22 @@ dati_indici = get_tutti_indici()
 @st.cache_data(ttl=120)
 def get_valore_header(tickers_tuple, pesi_tuple=None):
     """
-    Calcola il valore corrente dell'indice per l'header con pesi DSRM+UCITS reali.
-    Se pesi_tuple non è fornita, usa equiponderato come fallback.
+    Calcola per l'header:
+      - rendimento_totale: % dal primo giorno disponibile comune a tutti i ticker
+      - delta_oggi: rendimento giornaliero odierno %
+      - data_inception: data di partenza del calcolo
+
+    Usa pesi DSRM+UCITS reali se forniti, altrimenti equiponderato.
+    Cache 2 minuti.
     """
     import time as _t
     try:
         tickers_list = list(tickers_tuple)
+
+        # Scarica storico massimo disponibile per calcolare rendimento da inception
         for tentativo in range(3):
             try:
-                raw = yf.download(tickers_list, period="5d",
+                raw = yf.download(tickers_list, period="max",
                                   auto_adjust=True, progress=False)
                 if raw is not None and not raw.empty:
                     break
@@ -600,23 +607,35 @@ def get_valore_header(tickers_tuple, pesi_tuple=None):
             except Exception:
                 _t.sleep(2 ** tentativo)
         else:
-            return None, None, None
+            return None, None, None, None
 
         if isinstance(raw.columns, pd.MultiIndex):
             prezzi = raw['Close'] if 'Close' in raw.columns.get_level_values(0) else None
         else:
             prezzi = raw[['Close']] if 'Close' in raw.columns else None
         if prezzi is None:
-            return None, None, None
+            return None, None, None, None
 
+        # Tickers con almeno 2 giorni di dati
         tickers_ok = [t for t in tickers_list if t in prezzi.columns
                       and prezzi[t].dropna().shape[0] >= 2]
         if len(tickers_ok) < 2:
-            return None, None, None
+            return None, None, None, None
 
-        rend = prezzi[tickers_ok].pct_change().dropna(how='all').fillna(0)
+        # Data inception = prima data in cui TUTTI i ticker hanno dati
+        # (inner join sui prezzi — più conservativo e corretto)
+        prezzi_validi = prezzi[tickers_ok].dropna(how='any')
+        if len(prezzi_validi) < 2:
+            # Fallback: almeno 1 dato per ticker (outer)
+            prezzi_validi = prezzi[tickers_ok].dropna(how='all')
+        if len(prezzi_validi) < 2:
+            return None, None, None, None
 
-        # Usa pesi reali DSRM+UCITS se disponibili
+        data_inception = prezzi_validi.index[0]
+
+        rend = prezzi_validi.pct_change().dropna(how='all').fillna(0)
+
+        # Pesi
         if pesi_tuple is not None:
             pesi_dict = dict(pesi_tuple)
             pesi_v = np.array([pesi_dict.get(t, 0.0) for t in tickers_ok], dtype=float)
@@ -626,14 +645,14 @@ def get_valore_header(tickers_tuple, pesi_tuple=None):
             pesi_v = np.ones(len(tickers_ok)) / len(tickers_ok)
 
         rend_g = pd.Series(rend[tickers_ok].values @ pesi_v, index=rend.index)
-        idx_g  = (1 + rend_g).cumprod() * 100
+        idx_g  = (1 + rend_g).cumprod() * 1000  # Base 1000 — Rulebook Sez. 9D
 
-        valore      = round(float(idx_g.iloc[-1]), 2)
-        delta_oggi  = round(float(rend_g.iloc[-1]) * 100, 2)
-        delta_1w    = round(float((idx_g.iloc[-1] / idx_g.iloc[0] - 1) * 100), 2)
-        return valore, delta_oggi, delta_1w
+        rendimento_totale = round(float((idx_g.iloc[-1] / 1000 - 1) * 100), 2)
+        delta_oggi        = round(float(rend_g.iloc[-1]) * 100, 2)
+
+        return rendimento_totale, delta_oggi, data_inception, len(tickers_ok)
     except Exception:
-        return None, None, None
+        return None, None, None, None
 
 _header_tickers = tuple(df_aziende['Ticker'].dropna().unique()) if not df_aziende.empty else ()
 # Prepara pesi reali DSRM+UCITS per l'header (come tuple hashable per cache)
@@ -648,7 +667,10 @@ if not df_aziende.empty and 'Peso_Effettivo' in df_aziende.columns:
 else:
     _pesi_header = None
 
-_valore_idx, _delta_oggi, _delta_1w = get_valore_header(_header_tickers, _pesi_header) if _header_tickers else (None, None, None)
+_valore_idx, _delta_oggi, _data_inception, _n_ticker_ok = (
+    get_valore_header(_header_tickers, _pesi_header)
+    if _header_tickers else (None, None, None, None)
+)
 
 # ── Header iniettato via JS puro — elimina il bug HTML visibile ──────────────
 # st.markdown con HTML grezzo può mostrare il sorgente come testo in alcuni
@@ -703,7 +725,14 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ── Costruisce HTML dell'header — dati già calcolati ────────────────────────
-def _build_header_html(idx_val, delta_oggi, dati_ticker):
+def _build_header_html(rend_totale, delta_oggi, data_inception, dati_ticker):
+    """
+    Header Bloomberg-style:
+      ⬡ GGIV | GGIV +10.8% ▲ +0.95% oggi | S&P 500 … NASDAQ … VIX …
+    rend_totale  = rendimento % da inception
+    delta_oggi   = rendimento % giornaliero
+    data_inception = datetime — data di partenza del calcolo
+    """
     parts = []
 
     # Logo
@@ -715,15 +744,34 @@ def _build_header_html(idx_val, delta_oggi, dati_ticker):
     )
     parts.append('<div style="width:1px;height:28px;background:#1a3a5c;margin:0 20px;flex-shrink:0"></div>')
 
-    # Indice GGIV live
-    if idx_val is not None:
-        d_col  = "#00d4aa" if delta_oggi >= 0 else "#e05a5a"
-        d_sign = "+" if delta_oggi >= 0 else ""
+    # Blocco rendimento da inception
+    if rend_totale is not None:
+        r_col   = "#00d4aa" if rend_totale >= 0 else "#e05a5a"
+        r_sign  = "+" if rend_totale >= 0 else ""
+        d_col   = "#00d4aa" if (delta_oggi or 0) >= 0 else "#e05a5a"
+        d_sign  = "+" if (delta_oggi or 0) >= 0 else ""
+        d_val   = delta_oggi or 0
+
+        # Label inception — es. "dal 30 set 2025"
+        if data_inception is not None:
+            try:
+                inception_str = pd.Timestamp(data_inception).strftime("dal %d %b %Y")
+            except Exception:
+                inception_str = "da inception"
+        else:
+            inception_str = "da inception"
+
         parts.append(
-            '<div style="display:flex;align-items:baseline;gap:8px;flex-shrink:0;margin-right:20px">'
-            '<span style="font-size:9px;font-weight:600;color:#7a8fa6;letter-spacing:.12em;text-transform:uppercase">GGIV INDEX</span>'
-            f'<span style="font-size:18px;font-weight:600;color:#fff;letter-spacing:-.02em;font-variant-numeric:tabular-nums">{idx_val:.2f}</span>'
-            f'<span style="font-size:11px;font-weight:500;color:{d_col};font-variant-numeric:tabular-nums">{d_sign}{delta_oggi:.2f}%</span>'
+            '<div style="display:flex;align-items:baseline;gap:10px;flex-shrink:0;margin-right:20px">'
+            # Label + inception date sopra/sotto
+            '<div style="display:flex;flex-direction:column;justify-content:center;gap:1px;margin-right:2px">'
+            '<span style="font-size:8px;font-weight:600;color:#7a8fa6;letter-spacing:.10em;text-transform:uppercase;line-height:1.3">GGIV INDEX</span>'
+            f'<span style="font-size:7px;color:#3d5168;letter-spacing:.04em;line-height:1.3">{inception_str}</span>'
+            '</div>'
+            # Rendimento totale — grande
+            f'<span style="font-size:20px;font-weight:700;color:{r_col};letter-spacing:-.01em;font-variant-numeric:tabular-nums">{r_sign}{rend_totale:.1f}%</span>'
+            # Delta giornaliero — piccolo affianco
+            f'<span style="font-size:10px;font-weight:500;color:{d_col};font-variant-numeric:tabular-nums;opacity:.85">{d_sign}{d_val:.2f}% oggi</span>'
             '</div>'
         )
         parts.append('<div style="width:1px;height:28px;background:#1a3a5c;margin:0 20px;flex-shrink:0"></div>')
@@ -745,10 +793,9 @@ def _build_header_html(idx_val, delta_oggi, dati_ticker):
         + "".join(ticker_items)
         + '</div>'
     )
-
     return "".join(parts)
 
-_header_inner = _build_header_html(_valore_idx, _delta_oggi or 0, dati_indici)
+_header_inner = _build_header_html(_valore_idx, _delta_oggi, _data_inception, dati_indici)
 
 # ── st.components.v1.html è l'unico modo garantito per eseguire JS ──────────
 # L'iframe comunica col parent tramite postMessage per iniettare l'header
@@ -959,13 +1006,13 @@ def get_indice_live(tickers_tuple, bench="^GSPC", periodo="6mo"):
         pesi_v = np.array([pesi.get(t, 1/len(tickers_ok)) for t in tickers_ok])
         pesi_v = pesi_v / pesi_v.sum()
         rend_g = pd.Series(rend[tickers_ok].fillna(0).values @ pesi_v, index=rend.index)
-        idx_g  = (1 + rend_g).cumprod() * 100
+        idx_g  = (1 + rend_g).cumprod() * 1000
 
         bench_rend = bench_serie.pct_change().dropna().reindex(rend_g.index).fillna(0)
-        idx_b      = (1 + bench_rend).cumprod() * 100
+        idx_b      = (1 + bench_rend).cumprod() * 1000
 
         ny         = max(len(rend_g) / 252, 0.01)
-        cagr       = (idx_g.iloc[-1] / 100) ** (1/ny) - 1
+        cagr       = (idx_g.iloc[-1] / 1000) ** (1/ny) - 1
         vol        = rend_g.std() * np.sqrt(252)
         sh         = (cagr - 0.035) / vol if vol > 0 else 0
         dd         = ((idx_g - idx_g.cummax()) / idx_g.cummax()).min()
@@ -1110,13 +1157,13 @@ def get_indice_con_ribilanciamento(tickers_tuple, pesi_base_tuple, bench="^GSPC"
                 pesi_v_curr = nuovi / tot_n
 
         serie_rend = pd.Series(rendimenti_portafoglio, index=rend.index)
-        idx_g = (1 + serie_rend).cumprod() * 100
+        idx_g = (1 + serie_rend).cumprod() * 1000
 
         bench_rend = bench_serie.pct_change().dropna().reindex(serie_rend.index).fillna(0)
-        idx_b = (1 + bench_rend).cumprod() * 100
+        idx_b = (1 + bench_rend).cumprod() * 1000
 
         ny   = max(len(serie_rend) / 252, 0.01)
-        cagr = (idx_g.iloc[-1] / 100) ** (1/ny) - 1
+        cagr = (idx_g.iloc[-1] / 1000) ** (1/ny) - 1
         vol  = serie_rend.std() * np.sqrt(252)
         sh   = (cagr - 0.035) / vol if vol > 0 else 0
         dd   = ((idx_g - idx_g.cummax()) / idx_g.cummax()).min()
