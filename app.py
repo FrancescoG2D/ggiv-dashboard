@@ -51,6 +51,22 @@ st.markdown("""
         color: #00d4aa !important;
     }
 
+    /* --- NASCONDI SIDEBAR STREAMLIT E TOOLBAR BIANCA --- */
+    [data-testid="stSidebar"],
+    [data-testid="stSidebarNav"],
+    [data-testid="collapsedControl"],
+    [data-testid="stToolbar"],
+    [data-testid="stDecoration"],
+    [data-testid="stStatusWidget"],
+    .st-emotion-cache-uf99v8,
+    header[data-testid="stHeader"],
+    #MainMenu,
+    footer { display: none !important; visibility: hidden !important; }
+
+    /* Rimuove il padding-top che Streamlit aggiunge per la toolbar */
+    [data-testid="stAppViewContainer"] > section:first-child { padding-top: 0 !important; }
+    .main .block-container { padding-top: 68px !important; padding-left: 1rem !important; padding-right: 1rem !important; }
+
     /* --- TAB BAR --- */
     div[data-testid="stTabs"] > div:first-child {
         position: sticky !important;
@@ -829,43 +845,26 @@ _components.html(f"""
 """, height=0, scrolling=False)
 
 # ==========================================
-# 7. SIDEBAR
+# 7. PANNELLO LATERALE CUSTOM (sostituisce sidebar Streamlit)
 # ==========================================
-st.sidebar.markdown("""
-<div style="font-family:'Courier New',monospace; font-size:16px; color:#c9a84c;
-            letter-spacing:0.15em; font-weight:bold; padding:8px 0 16px;">
-    ⬡ GGIV TERMINAL
-</div>
-""", unsafe_allow_html=True)
-st.sidebar.markdown("---")
-st.sidebar.markdown('<p style="font-size:11px; color:#7a8fa6; letter-spacing:0.08em;">PARAMETRI PORTAFOGLIO</p>', unsafe_allow_html=True)
-
-# AUM persistente via session_state
+# AUM persistente via session_state — widget nascosto ma funzionale
 if 'capitale_globale' not in st.session_state:
     st.session_state['capitale_globale'] = 100000
-capitale_globale = st.sidebar.number_input(
-    "Capitale AUM (€):", min_value=1000,
-    value=st.session_state['capitale_globale'], step=1000,
-    key='capitale_globale'
-)
 
-st.sidebar.markdown("---")
+# Input AUM reso invisibile ma mantenuto per compatibilità con il resto del codice
+# Il pannello custom lo mostrerà tramite JS con postMessage per aggiornarlo
+capitale_globale = st.session_state['capitale_globale']
 
-# Sidebar arricchita — stato DSRM + prossimo ribilanciamento
+# Calcola dati per il pannello
+_n_verde = _n_giallo = _n_kill = 0
 if not df_aziende.empty and 'Fattore_DSRM' in df_aziende.columns:
-    n_v = int((df_aziende['Fattore_DSRM'] == 1.0).sum())
-    n_g = int((df_aziende['Fattore_DSRM'] == 0.75).sum())
-    n_r = int((df_aziende['Fattore_DSRM'] == 0.0).sum())
-    st.sidebar.markdown('<p style="font-size:11px; color:#7a8fa6; letter-spacing:0.08em;">DSRM STATUS</p>', unsafe_allow_html=True)
-    st.sidebar.markdown(f"""
-    <div style="font-family:'Courier New',monospace; font-size:12px; line-height:2;">
-        <span style="color:#00d4aa;">●</span> Verde: <b>{n_v}</b>&nbsp;&nbsp;
-        <span style="color:#c9a84c;">●</span> Giallo: <b>{n_g}</b>&nbsp;&nbsp;
-        <span style="color:#e05a5a;">●</span> Kill: <b>{n_r}</b>
-    </div>""", unsafe_allow_html=True)
-    st.sidebar.markdown("---")
+    _n_verde  = int((df_aziende['Fattore_DSRM'] == 1.00).sum())
+    _n_giallo = int((df_aziende['Fattore_DSRM'] == 0.75).sum())
+    _n_kill   = int((df_aziende['Fattore_DSRM'] == 0.00).sum())
 
-# Prossimo ribilanciamento trimestrale — con announcement date (Rulebook 7-BIS.2)
+_dsrm_health = round(_n_verde / max(_n_verde + _n_giallo + _n_kill, 1) * 100)
+
+# Prossimo ribilanciamento
 import calendar as _cal_mod
 oggi_dt = datetime.now()
 
@@ -874,71 +873,279 @@ def _primo_lunedi(anno, mese):
     giorni_al_lun = (7 - data_primo.weekday()) % 7
     return datetime(anno, mese, 1 + giorni_al_lun)
 
-def _primo_venerdi_febbraio(anno):
-    """Announcement date Q1: primo venerdì di febbraio (Rulebook 7-BIS.2)"""
-    d = datetime(anno, 2, 1)
-    giorni_al_ven = (4 - d.weekday()) % 7  # venerdì=4
-    return datetime(anno, 2, 1 + giorni_al_ven)
+def _primo_venerdi(anno, mese):
+    d = datetime(anno, mese, 1)
+    return d + __import__('datetime').timedelta(days=(4 - d.weekday()) % 7)
 
-# Mappa trimestre → (mese_effective, mese_cutoff, mese_annuncio)
 TRIMESTRI_RIB = [
-    ("Q1", 3,  _primo_venerdi_febbraio),          # effective=Mar, annuncio=1°ven Feb
-    ("Q2", 6,  lambda y: datetime(y, 5, 1) + __import__('datetime').timedelta(days=(4 - datetime(y, 5, 1).weekday()) % 7)),
-    ("Q3", 9,  lambda y: datetime(y, 8, 1) + __import__('datetime').timedelta(days=(4 - datetime(y, 8, 1).weekday()) % 7)),
-    ("Q4", 12, lambda y: datetime(y, 11, 1) + __import__('datetime').timedelta(days=(4 - datetime(y, 11, 1).weekday()) % 7)),
+    ("Q1", 3, lambda y: _primo_venerdi(y, 2)),
+    ("Q2", 6, lambda y: _primo_venerdi(y, 5)),
+    ("Q3", 9, lambda y: _primo_venerdi(y, 8)),
+    ("Q4", 12, lambda y: _primo_venerdi(y, 11)),
 ]
 
-# Trova il prossimo ribilanciamento
 prossimo_ribil = None
 for q_label, mese_eff, fn_ann in TRIMESTRI_RIB:
     for anno_off in [0, 1]:
         anno_t = oggi_dt.year + anno_off
         effective = _primo_lunedi(anno_t, mese_eff)
         if effective > oggi_dt:
-            try:
-                annuncio = fn_ann(anno_t)
-            except Exception:
-                annuncio = effective - __import__('datetime').timedelta(days=3)
-            # Cut-off = ultimo giorno del mese precedente all'annuncio
-            mese_cutoff = annuncio.month - 1 if annuncio.month > 1 else 12
-            anno_cutoff = anno_t if annuncio.month > 1 else anno_t - 1
-            giorni_cutoff = _cal_mod.monthrange(anno_cutoff, mese_cutoff)[1]
-            cutoff = datetime(anno_cutoff, mese_cutoff, giorni_cutoff)
+            annuncio = fn_ann(anno_t)
+            mese_co = annuncio.month - 1 if annuncio.month > 1 else 12
+            anno_co = anno_t if annuncio.month > 1 else anno_t - 1
+            cutoff  = datetime(anno_co, mese_co,
+                               _cal_mod.monthrange(anno_co, mese_co)[1])
+            fase = ("PRE CUT-OFF" if oggi_dt < cutoff
+                    else ("ANNUNCIO" if oggi_dt < annuncio else "EFFECTIVE"))
             prossimo_ribil = {
-                'label': q_label,
-                'effective': effective,
-                'annuncio': annuncio,
-                'cutoff': cutoff,
-                'giorni': (effective - oggi_dt).days,
+                'label': q_label, 'effective': effective,
+                'annuncio': annuncio, 'cutoff': cutoff,
+                'giorni': (effective - oggi_dt).days, 'fase': fase,
             }
             break
     if prossimo_ribil:
         break
 
-if prossimo_ribil:
-    pr = prossimo_ribil
-    fase_attuale = (
-        "PRE CUT-OFF" if oggi_dt < pr['cutoff']
-        else ("FINESTRA ANNUNCIO" if oggi_dt < pr['annuncio']
-              else "SETTIMANA EFFECTIVE")
-    )
-    st.sidebar.markdown('<p style="font-size:11px; color:#7a8fa6; letter-spacing:0.08em;">PROSSIMO RIBILANCIAMENTO</p>', unsafe_allow_html=True)
-    st.sidebar.markdown(f"""
-    <div style="font-family:'Courier New',monospace; font-size:11px; line-height:1.9;">
-        <span style="color:#c9a84c; font-weight:bold;">{pr['label']}</span>
-        <span style="color:#7a8fa6;"> — Effective:</span>
-        <span style="color:#e8eaf0;"> {pr['effective'].strftime('%d %b %Y')}</span><br>
-        <span style="color:#7a8fa6;">Cut-off:</span>
-        <span style="color:#e8eaf0;"> {pr['cutoff'].strftime('%d %b %Y')}</span><br>
-        <span style="color:#7a8fa6;">Annuncio:</span>
-        <span style="color:#e8eaf0;"> {pr['annuncio'].strftime('%d %b %Y')}</span><br>
-        <span style="color:#7a8fa6;">Fase: </span>
-        <span style="color:#00d4aa;">{fase_attuale}</span><br>
-        <span style="font-size:10px; color:#7a8fa6;">tra {pr['giorni']} giorni (effective)</span>
-    </div>""", unsafe_allow_html=True)
-    st.sidebar.markdown("---")
+# Peso shield per pannello
+_peso_shield = (df_aziende[df_aziende['Tier'] == 'Tier 3']['Peso_Effettivo'].sum()
+                if not df_aziende.empty and 'Peso_Effettivo' in df_aziende.columns else 0)
+_peso_t1 = (df_aziende[df_aziende['Tier'] == 'Tier 1']['Peso_Effettivo'].sum()
+            if not df_aziende.empty and 'Peso_Effettivo' in df_aziende.columns else 0)
+_peso_t2 = (df_aziende[df_aziende['Tier'] == 'Tier 2']['Peso_Effettivo'].sum()
+            if not df_aziende.empty and 'Peso_Effettivo' in df_aziende.columns else 0)
 
-st.sidebar.markdown(f'<p style="font-size:10px; color:#7a8fa6;">Aggiornato: {datetime.now().strftime("%d/%m/%Y %H:%M")}</p>', unsafe_allow_html=True)
+# Costruisce HTML del pannello laterale
+_pr = prossimo_ribil
+_rib_html = ""
+if _pr:
+    _fase_col = {"PRE CUT-OFF": "#7a8fa6", "ANNUNCIO": "#c9a84c", "EFFECTIVE": "#00d4aa"}.get(_pr['fase'], "#7a8fa6")
+    _rib_html = f"""
+    <div class="sp-section">
+      <div class="sp-label">PROSSIMO RIBILANCIAMENTO</div>
+      <div class="sp-ribil">
+        <span class="sp-q">{_pr['label']}</span>
+        <span class="sp-fase" style="color:{_fase_col}">{_pr['fase']}</span>
+      </div>
+      <div class="sp-row"><span class="sp-k">Cut-off</span><span class="sp-v">{_pr['cutoff'].strftime('%d %b %Y')}</span></div>
+      <div class="sp-row"><span class="sp-k">Annuncio</span><span class="sp-v">{_pr['annuncio'].strftime('%d %b %Y')}</span></div>
+      <div class="sp-row"><span class="sp-k">Effective</span><span class="sp-v">{_pr['effective'].strftime('%d %b %Y')}</span></div>
+      <div class="sp-countdown">tra {_pr['giorni']} giorni</div>
+    </div>"""
+
+_shield_col = "#00d4aa" if _peso_shield >= 25 else ("#c9a84c" if _peso_shield >= 10 else "#e05a5a")
+_panel_html = f"""
+<div id="ggiv-side-panel">
+  <div class="sp-inner">
+
+    <div class="sp-header">
+      <span class="sp-logo">⬡ GGIV TERMINAL</span>
+      <button class="sp-close" onclick="togglePanel()">✕</button>
+    </div>
+
+    <div class="sp-section">
+      <div class="sp-label">PARAMETRI PORTAFOGLIO</div>
+      <div class="sp-aum-row">
+        <span class="sp-k">AUM (€)</span>
+        <div class="sp-aum-ctrl">
+          <button class="sp-aum-btn" onclick="changeAUM(-10000)">−</button>
+          <span class="sp-aum-val" id="sp-aum-display">{capitale_globale:,}</span>
+          <button class="sp-aum-btn" onclick="changeAUM(+10000)">+</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="sp-divider"></div>
+
+    <div class="sp-section">
+      <div class="sp-label">DSRM STATUS</div>
+      <div class="sp-dsrm">
+        <div class="sp-dsrm-item">
+          <span class="sp-dot" style="background:#00d4aa"></span>
+          <span class="sp-dsrm-label">Verde</span>
+          <span class="sp-dsrm-n">{_n_verde}</span>
+        </div>
+        <div class="sp-dsrm-item">
+          <span class="sp-dot" style="background:#c9a84c"></span>
+          <span class="sp-dsrm-label">Giallo</span>
+          <span class="sp-dsrm-n">{_n_giallo}</span>
+        </div>
+        <div class="sp-dsrm-item">
+          <span class="sp-dot" style="background:#e05a5a"></span>
+          <span class="sp-dsrm-label">Kill</span>
+          <span class="sp-dsrm-n">{_n_kill}</span>
+        </div>
+      </div>
+      <div class="sp-health-bar">
+        <div class="sp-health-fill" style="width:{_dsrm_health}%;background:{'#00d4aa' if _dsrm_health>=80 else '#c9a84c' if _dsrm_health>=50 else '#e05a5a'}"></div>
+      </div>
+      <div class="sp-health-label">Health {_dsrm_health}%</div>
+    </div>
+
+    <div class="sp-divider"></div>
+
+    <div class="sp-section">
+      <div class="sp-label">ALLOCAZIONE TIER</div>
+      <div class="sp-tier-row">
+        <span class="sp-k">Tier 1 Alpha</span>
+        <span class="sp-v" style="color:#00d4aa">{_peso_t1:.1f}%</span>
+      </div>
+      <div class="sp-tier-row">
+        <span class="sp-k">Tier 2 Supply</span>
+        <span class="sp-v" style="color:#c9a84c">{_peso_t2:.1f}%</span>
+      </div>
+      <div class="sp-tier-row">
+        <span class="sp-k">Tier 3 Shield</span>
+        <span class="sp-v" style="color:{_shield_col}">{_peso_shield:.1f}%</span>
+      </div>
+    </div>
+
+    <div class="sp-divider"></div>
+
+    {_rib_html}
+
+    <div class="sp-divider"></div>
+
+    <div class="sp-footer">Aggiornato {datetime.now().strftime('%d/%m/%Y %H:%M')}</div>
+  </div>
+</div>
+"""
+
+_panel_css = """
+<style>
+#ggiv-side-panel {
+  position: fixed; top: 52px; right: -300px; width: 280px;
+  height: calc(100vh - 52px); background: #0a0e1a;
+  border-left: 1px solid #1a2d45; z-index: 9999998;
+  transition: right 0.28s cubic-bezier(.4,0,.2,1);
+  overflow-y: auto; overflow-x: hidden;
+  font-family: 'Inter','Segoe UI',system-ui,sans-serif;
+}
+#ggiv-side-panel.open { right: 0 !important; }
+.sp-inner { padding: 0 0 24px 0; }
+.sp-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px 12px; border-bottom: 1px solid #1a2d45;
+  position: sticky; top: 0; background: #0a0e1a; z-index: 2;
+}
+.sp-logo { font-size: 12px; font-weight: 700; color: #c9a84c; letter-spacing: .12em; }
+.sp-close {
+  background: none; border: none; color: #7a8fa6; font-size: 14px;
+  cursor: pointer; padding: 2px 6px; border-radius: 3px;
+}
+.sp-close:hover { color: #e8eaf0; background: #1a2d45; }
+.sp-section { padding: 14px 16px 4px; }
+.sp-label {
+  font-size: 9px; font-weight: 600; color: #7a8fa6;
+  letter-spacing: .10em; text-transform: uppercase; margin-bottom: 10px;
+}
+.sp-divider { height: 1px; background: #1a2d45; margin: 8px 0; }
+.sp-row, .sp-tier-row, .sp-aum-row {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 6px;
+}
+.sp-k { font-size: 11px; color: #7a8fa6; }
+.sp-v { font-size: 11px; color: #e8eaf0; font-variant-numeric: tabular-nums; font-weight: 500; }
+/* AUM */
+.sp-aum-ctrl { display: flex; align-items: center; gap: 6px; }
+.sp-aum-btn {
+  background: #1a2d45; border: none; color: #00d4aa; font-size: 14px;
+  width: 22px; height: 22px; border-radius: 3px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; line-height: 1;
+}
+.sp-aum-btn:hover { background: #00d4aa; color: #0a0e1a; }
+.sp-aum-val { font-size: 12px; color: #e8eaf0; font-variant-numeric: tabular-nums; min-width: 70px; text-align: center; }
+/* DSRM */
+.sp-dsrm { display: flex; gap: 12px; margin-bottom: 8px; }
+.sp-dsrm-item { display: flex; align-items: center; gap: 5px; }
+.sp-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.sp-dsrm-label { font-size: 10px; color: #7a8fa6; }
+.sp-dsrm-n { font-size: 12px; font-weight: 600; color: #e8eaf0; margin-left: 2px; }
+.sp-health-bar { height: 3px; background: #1a2d45; border-radius: 2px; margin-bottom: 4px; }
+.sp-health-fill { height: 100%; border-radius: 2px; transition: width .5s; }
+.sp-health-label { font-size: 9px; color: #7a8fa6; text-align: right; }
+/* Ribilanciamento */
+.sp-ribil { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.sp-q { font-size: 16px; font-weight: 700; color: #c9a84c; }
+.sp-fase { font-size: 9px; font-weight: 600; letter-spacing: .08em; }
+.sp-countdown { font-size: 10px; color: #7a8fa6; margin-top: 6px; text-align: right; }
+.sp-footer { font-size: 9px; color: #3d5168; padding: 8px 16px 0; }
+/* Bottone apri pannello nell'header */
+#ggiv-panel-toggle {
+  position: fixed; top: 0; right: 0; height: 52px; width: 48px;
+  background: transparent; border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  z-index: 9999999; color: #7a8fa6; font-size: 18px;
+  transition: color .2s;
+}
+#ggiv-panel-toggle:hover { color: #c9a84c; }
+#ggiv-panel-toggle.active { color: #c9a84c; }
+</style>
+"""
+
+# Inietta pannello + CSS + toggle button via components.html
+_components.html(f"""
+{_panel_css}
+<script>
+(function() {{
+  var doc = window.parent.document;
+
+  // Rimuove elementi precedenti (rerun)
+  ['ggiv-side-panel','ggiv-panel-toggle','ggiv-panel-style'].forEach(function(id) {{
+    var el = doc.getElementById(id);
+    if (el) el.remove();
+  }});
+
+  // Inject CSS
+  var style = doc.createElement('style');
+  style.id = 'ggiv-panel-style';
+  style.textContent = {repr(_panel_css.replace('<style>','').replace('</style>',''))};
+  doc.head.appendChild(style);
+
+  // Inject pannello
+  var panel = doc.createElement('div');
+  panel.id = 'ggiv-side-panel-wrap';
+  panel.innerHTML = {repr(_panel_html)};
+  doc.body.appendChild(panel);
+
+  // Inject toggle button (hamburger in alto a destra nell'header)
+  var btn = doc.createElement('button');
+  btn.id = 'ggiv-panel-toggle';
+  btn.title = 'Apri pannello';
+  btn.innerHTML = '☰';
+  doc.body.appendChild(btn);
+
+  // Toggle logic
+  var aum = {capitale_globale};
+  function togglePanel() {{
+    var p = doc.getElementById('ggiv-side-panel');
+    if (!p) return;
+    p.classList.toggle('open');
+    btn.classList.toggle('active');
+    btn.innerHTML = p.classList.contains('open') ? '✕' : '☰';
+  }}
+  btn.onclick = togglePanel;
+
+  // Rende togglePanel globale per il bottone ✕ interno
+  window.parent.togglePanel = togglePanel;
+
+  // AUM controls
+  function changeAUM(delta) {{
+    aum = Math.max(1000, aum + delta);
+    var disp = doc.getElementById('sp-aum-display');
+    if (disp) disp.textContent = aum.toLocaleString('it-IT');
+    // Salva su session_state via hidden Streamlit input se presente
+    var inp = doc.querySelector('input[aria-label="Capitale AUM"]');
+    if (inp) {{
+      var nativeInput = Object.getOwnPropertyDescriptor(window.parent.HTMLInputElement.prototype, 'value');
+      nativeInput.set.call(inp, aum);
+      inp.dispatchEvent(new Event('input', {{ bubbles: true }}));
+    }}
+  }}
+  window.parent.changeAUM = changeAUM;
+
+}})();
+</script>
+""", height=0, scrolling=False)
 
 # ==========================================
 # 8. FUNZIONI CONDIVISE UI
